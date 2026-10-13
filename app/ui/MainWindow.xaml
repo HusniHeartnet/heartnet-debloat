@@ -138,14 +138,30 @@
             </StackPanel>
         </Grid>
 
+        <!-- Confirm / result / undo screens (built in code, see Main.ps1) -->
+        <Grid Grid.Row="1" Grid.RowSpan="2" x:Name="FlowOverlay" Background="{StaticResource Paper}" Visibility="Collapsed" Panel.ZIndex="10">
+            <DockPanel>
+                <Border DockPanel.Dock="Bottom" Background="White" BorderBrush="{StaticResource Ink}" BorderThickness="0,3,0,0" Padding="16,10">
+                    <DockPanel>
+                        <StackPanel x:Name="FlowButtons" Orientation="Horizontal" DockPanel.Dock="Right"/>
+                        <TextBlock x:Name="FlowStatus" VerticalAlignment="Center" FontSize="12" Foreground="#3B4650" TextWrapping="Wrap"/>
+                    </DockPanel>
+                </Border>
+                <ScrollViewer x:Name="FlowScroll" VerticalScrollBarVisibility="Auto" Padding="20,16,16,16">
+                    <StackPanel x:Name="FlowPanel" MaxWidth="940"/>
+                </ScrollViewer>
+            </DockPanel>
+        </Grid>
+
         <!-- Footer -->
-        <Border Grid.Row="2" Background="White" BorderBrush="{StaticResource Ink}" BorderThickness="0,3,0,0" Padding="16,10">
+        <Border Grid.Row="2" x:Name="Footer" Background="White" BorderBrush="{StaticResource Ink}" BorderThickness="0,3,0,0" Padding="16,10">
             <DockPanel>
                 <StackPanel Orientation="Horizontal" DockPanel.Dock="Right">
                     <Button x:Name="BtnAdmin" Style="{StaticResource HDButton}" Background="#E3A33B" Visibility="Collapsed"/>
+                    <Button x:Name="BtnUndo" Style="{StaticResource HDButton}"/>
                     <Button x:Name="BtnRescan" Style="{StaticResource HDButton}"/>
                     <Button x:Name="BtnSave" Style="{StaticResource HDButton}"/>
-                    <Button x:Name="BtnRun" Style="{StaticResource HDPrimary}" IsEnabled="False" ToolTipService.ShowOnDisabled="True"/>
+                    <Button x:Name="BtnRun" Style="{StaticResource HDPrimary}" IsEnabled="False"/>
                 </StackPanel>
                 <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
                     <CheckBox x:Name="ChkShowAll" VerticalAlignment="Center" Foreground="{StaticResource Ink}"/>

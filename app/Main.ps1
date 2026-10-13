@@ -1,7 +1,10 @@
 # Heartnet Debloat - entry point.
 #   UI (default):  powershell -ExecutionPolicy Bypass -File app\Main.ps1
-#   Headless:      powershell -ExecutionPolicy Bypass -File app\Main.ps1 -Cli [-Json out.json] [-Html out.html]
-# This version only scans. It never changes the system.
+#   Headless scan: powershell -ExecutionPolicy Bypass -File app\Main.ps1 -Cli [-Json out.json] [-Html out.html]
+#   Headless run:  ... -Cli -Apply default|<id>,<id> [-AllowNoRestorePoint]   (one UAC prompt for system items)
+#   Undo:          ... -Cli -Undo latest|all|<runId>|<runId>:<itemId>,...
+#   Past runs:     ... -Cli -ListRuns
+# The scan only reads. Changes happen only after "Backup & jalankan" (or -Apply), always with a backup.
 
 param(
     [switch]$Cli,
@@ -9,17 +12,75 @@ param(
     [string]$Html,
     [ValidateSet('id', 'en')][string]$Lang = 'id',
     [string]$Category,      # open the UI on this category (handy for testing/screenshots)
-    [switch]$ShowAll
+    [switch]$ShowAll,
+    [string[]]$Apply,
+    [string[]]$Undo,
+    [switch]$ListRuns,
+    [switch]$AllowNoRestorePoint,
+    [string]$Screenshot,    # render the window to this PNG after the scan, then close (changes nothing)
+    [ValidateSet('main', 'confirm', 'undo')][string]$Screen = 'main'
 )
 
 $ErrorActionPreference = 'Stop'
 $AppDir = $PSScriptRoot
-. (Join-Path $AppDir 'core\Lang.ps1')
-. (Join-Path $AppDir 'core\Scan.ps1')
-. (Join-Path $AppDir 'core\Report.ps1')
+foreach ($f in 'Lang', 'Scan', 'Report', 'Backup', 'Safety', 'Apply', 'Undo') { . (Join-Path $AppDir "core\$f.ps1") }
+foreach ($f in Get-ChildItem (Join-Path $AppDir 'handlers') -Filter *.ps1) { . $f.FullName }
 Initialize-HDLang $Lang
 
-# ------------------------------------------------------------------ headless mode
+function Write-HDItemResults {
+    param([object[]]$Items)
+    foreach ($i in $Items) {
+        $color = switch ($i.Result) { 'Success' { 'Green' } 'Failed' { 'Red' } default { 'Gray' } }
+        Write-Host ('  {0,-10} {1}' -f (T "result.$($i.Result)"), $i.Title) -ForegroundColor $color
+        foreach ($r in @($i.Reasons)) { Write-Host "             - $r" }
+        foreach ($l in @($i.Links)) { if ($l) { Write-Host "             > $l" } }
+    }
+}
+
+# ------------------------------------------------------------------ headless: past runs / undo / apply
+if ($ListRuns) {
+    foreach ($m in Get-HDRunList) {
+        Write-Host ''
+        Write-Host ('== {0}  ({1})  {2}' -f $m.RunId, $m.CreatedAt, $m.Folder) -ForegroundColor Magenta
+        foreach ($i in @($m.Items)) { Write-Host ('  {0,-10} {1,-12} {2,-28} {3}' -f (T "result.$($i.Result)"), (T "undo.state.$($i.UndoState)"), $i.Id, $i.Title) }
+    }
+    return
+}
+
+if ($Undo) {
+    $runs = @(Get-HDRunList)
+    $sel = @()
+    foreach ($u in @($Undo | ForEach-Object { $_ -split ',' } | Where-Object { $_ })) {
+        if ($u -eq 'all') { $sel += @($runs | ForEach-Object { @{ RunId = $_.RunId; Items = @('*') } }) }
+        elseif ($u -eq 'latest') { if ($runs.Count) { $sel += @{ RunId = $runs[0].RunId; Items = @('*') } } }
+        elseif ($u -match '^([\d-]+):(.+)$') { $sel += @{ RunId = $Matches[1]; Items = @($Matches[2]) } }
+        else { $sel += @{ RunId = $u; Items = @('*') } }
+    }
+    if (-not $sel.Count) { Write-Host (T 'undo.none'); return }
+    $res = Invoke-HDUndoHeadless -Selection $sel
+    Write-Host ''
+    Write-HDItemResults $res
+    return
+}
+
+if ($Apply) {
+    $scan = Invoke-HDScan -Progress { param($s) Write-Host ('  ' + (T 'ui.scan.step' (T "step.$s"))) }
+    $ids = @($Apply | ForEach-Object { $_ -split ',' } | Where-Object { $_ })
+    if ($ids -contains 'default') { $ids = @($scan.Items | Where-Object { $_.Checked } | ForEach-Object { $_.Id }) }
+    $bad = @($ids | Where-Object { $id = $_; -not ($scan.Items | Where-Object { $_.Id -eq $id -and $_.Selectable }) })
+    foreach ($b in $bad) { Write-Host (T 'cli.notselectable' $b) -ForegroundColor Yellow }
+    $ids = @($ids | Where-Object { $bad -notcontains $_ })
+    if (-not $ids.Count) { Write-Host (T 'undo.none'); return }
+    $m = Invoke-HDRunHeadless -Scan $scan -Ids $ids -AllowNoRestorePoint:$AllowNoRestorePoint
+    Write-Host ''
+    $rp = $m.RestorePoint
+    Write-Host $(if ($rp -and $rp.Status -eq 'Created') { T 'run.rp.ok' $rp.Sequence } elseif ($rp) { T 'rp.failed' $rp.Reason } else { T 'run.rp.none' })
+    Write-HDItemResults $m.Items
+    Write-Host (T 'run.report.folder' $m.Folder)
+    return
+}
+
+# ------------------------------------------------------------------ headless scan
 if ($Cli -or $Json -or $Html) {
     $scan = Invoke-HDScan -Progress { param($s) Write-Host ('  ' + (T 'ui.scan.step' (T "step.$s"))) }
     $visible = @($scan.Items | Where-Object { $_.State -ne 'NotPresent' })
@@ -73,7 +134,7 @@ $RiskStyle = @{
 }
 $Categories = 'warn', 'apps', 'ads', 'startup', 'oem', 'xbox', 'privacy', 'system', 'security', 'notdone'
 
-$State = @{ Scan = $null; Selection = @{}; Category = $null; Job = $null }
+$State = @{ Scan = $null; Selection = @{}; Category = $null; Job = $null; Run = $null }
 
 $mascot = New-HDImage (Join-Path $AppDir 'assets\mascot.png')
 $UI.HeaderMascot.Source = $mascot
@@ -88,7 +149,7 @@ $UI.ChkShowAll.Content = T 'ui.showall'
 $UI.BtnSave.Content = T 'ui.save'
 $UI.BtnRescan.Content = T 'ui.rescan'
 $UI.BtnRun.Content = T 'ui.run'
-$UI.BtnRun.ToolTip = T 'ui.run.soon'
+$UI.BtnUndo.Content = T 'ui.undo'
 $UI.BtnAdmin.Content = T 'ui.admin.rescan'
 $UI.BtnAdmin.ToolTip = T 'ui.admin.why'
 $UI.ChkShowAll.IsChecked = [bool]$ShowAll
@@ -268,6 +329,7 @@ function Update-HDNav {
 function Update-HDCount {
     $n = @($State.Selection.Keys | Where-Object { $State.Selection[$_] }).Count
     $UI.SelectedCount.Text = T 'ui.selected' $n
+    $UI.BtnRun.IsEnabled = ($n -gt 0)
 }
 
 function Show-HDScan($Scan) {
@@ -285,6 +347,20 @@ function Show-HDScan($Scan) {
     Update-HDNav
     Update-HDCount
     $UI.ScanOverlay.Visibility = 'Collapsed'
+    if ($Screenshot) {
+        if ($Screen -eq 'confirm') { Show-HDConfirm } elseif ($Screen -eq 'undo') { Show-HDUndoScreen }
+        [void]$Window.Dispatcher.BeginInvoke([Windows.Threading.DispatcherPriority]::ContextIdle, [action] { Save-HDScreenshot $Screenshot; $Window.Close() })
+    }
+}
+
+function Save-HDScreenshot([string]$Path) {
+    $Window.UpdateLayout()
+    $bmp = New-Object Windows.Media.Imaging.RenderTargetBitmap ([int]$Window.ActualWidth), ([int]$Window.ActualHeight), 96, 96, ([Windows.Media.PixelFormats]::Pbgra32)
+    $bmp.Render($Window)
+    $enc = New-Object Windows.Media.Imaging.PngBitmapEncoder
+    $enc.Frames.Add([Windows.Media.Imaging.BitmapFrame]::Create($bmp))
+    $fs = [IO.File]::Create($Path)
+    try { $enc.Save($fs) } finally { $fs.Close() }
 }
 
 # ------------------------------------------------------------------ background scan
@@ -330,6 +406,402 @@ $timer.Add_Tick({
         Show-HDScan $job.Sync.Result
     })
 
+# ------------------------------------------------------------------ confirm / run / result / undo screens
+
+$ResultStyle = @{
+    Success = @{ Bg = $Colors.Navy; Fg = '#FFFFFF' }
+    Skipped = @{ Bg = '#FFFFFF'; Fg = $Colors.Ink }
+    Failed  = @{ Bg = $Colors.Wing; Fg = '#FFFFFF' }
+}
+
+function New-HDPanelCard([string]$Bg = '#FFFFFF') {
+    # White sticker card with the flat ink shadow; returns @{ Outer; Stack }.
+    $outer = New-Object Windows.Controls.Grid
+    $outer.Margin = '0,0,0,14'
+    $shadow = New-Object Windows.Controls.Border
+    $shadow.Background = New-HDBrush $Colors.Ink; $shadow.CornerRadius = 12; $shadow.Margin = '4,4,0,0'
+    $card = New-Object Windows.Controls.Border
+    $card.Background = New-HDBrush $Bg; $card.BorderBrush = New-HDBrush $Colors.Ink; $card.BorderThickness = 2
+    $card.CornerRadius = 12; $card.Margin = '0,0,4,4'; $card.Padding = '14,10'
+    [void]$outer.Children.Add($shadow); [void]$outer.Children.Add($card)
+    $stack = New-Object Windows.Controls.StackPanel
+    $card.Child = $stack
+    return @{ Outer = $outer; Stack = $stack }
+}
+
+function New-HDButton([string]$Text, [scriptblock]$OnClick, [switch]$Primary, [object]$Tag) {
+    $b = New-Object Windows.Controls.Button
+    $b.Content = $Text
+    $b.Style = $Window.FindResource($(if ($Primary) { 'HDPrimary' } else { 'HDButton' }))
+    $b.Tag = $Tag
+    $b.Add_Click($OnClick)
+    return $b
+}
+
+function Show-HDFlow([string]$Title, [string]$Sub) {
+    $UI.FlowPanel.Children.Clear()
+    $UI.FlowButtons.Children.Clear()
+    $UI.FlowStatus.Text = ''
+    $head = New-Object Windows.Controls.DockPanel
+    $head.Margin = '0,0,0,14'
+    $img = New-Object Windows.Controls.Image
+    $img.Source = $mascot; $img.Width = 72; $img.Height = 72
+    [Windows.Controls.DockPanel]::SetDock($img, 'Left')
+    [void]$head.Children.Add($img)
+    $txt = New-Object Windows.Controls.StackPanel
+    $txt.Margin = '12,0,0,0'; $txt.VerticalAlignment = 'Center'
+    [void]$txt.Children.Add((New-HDText $Title 22 $Colors.Ink 'Black'))
+    if ($Sub) { $st = New-HDText $Sub 14 $Colors.Muted; $st.Margin = '0,4,0,0'; [void]$txt.Children.Add($st) }
+    [void]$head.Children.Add($txt)
+    [void]$UI.FlowPanel.Children.Add($head)
+    $UI.FlowOverlay.Visibility = 'Visible'
+    $UI.FlowScroll.ScrollToTop()
+}
+
+function Add-HDFlowNote([string]$Text, [string]$Bg = '#FFF6E6', [string]$Color = $Colors.Ink) {
+    $c = New-HDPanelCard $Bg
+    [void]$c.Stack.Children.Add((New-HDText $Text 13.5 $Color))
+    [void]$UI.FlowPanel.Children.Add($c.Outer)
+}
+
+function Hide-HDFlow { $UI.FlowOverlay.Visibility = 'Collapsed' }
+
+function Show-HDProgress([string]$Title, [string]$Sub) {
+    Hide-HDFlow
+    $UI.ScanTitle.Text = $Title
+    $UI.ScanSub.Text = $Sub
+    $UI.ScanStep.Text = ''
+    $UI.ScanProgress.IsIndeterminate = $true
+    $UI.ScanOverlay.Visibility = 'Visible'
+    $UI.Footer.IsEnabled = $false
+}
+
+function Hide-HDProgress {
+    $UI.ScanOverlay.Visibility = 'Collapsed'
+    $UI.Footer.IsEnabled = $true
+}
+
+# ---- 1. confirmation before running
+
+function Show-HDConfirm {
+    $items = @($State.Scan.Items | Where-Object { $_.Selectable -and $State.Selection[$_.Id] })
+    if (-not $items.Count) { return }
+    Show-HDFlow (T 'confirm.title' $items.Count) (T 'confirm.sub')
+
+    $machine = @($items | Where-Object { (Get-HDItemSides $_) -contains 'Machine' })
+    Add-HDFlowNote (T 'confirm.backup') $Colors.SlateLight
+    Add-HDFlowNote (T 'confirm.uac')
+    $policy = @($items | Where-Object { Test-HDItemPolicy $_ })
+    if ($policy.Count) { Add-HDFlowNote (T 'confirm.policy' (($policy | ForEach-Object { $_.Title }) -join ', ')) }
+    if ($items | Where-Object { $_.Targets | Where-Object { $_.T -eq 'Win32App' } }) { Add-HDFlowNote (T 'note.uninstall') '#FFF6E6' $Colors.Wing }
+    if ($State.Scan.OtherUser) { Add-HDFlowNote (T 'reason.otheruser' @($State.Scan.OtherUser.Me, $State.Scan.OtherUser.Desktop)) '#FFF6E6' $Colors.Wing }
+
+    $c = New-HDPanelCard
+    foreach ($i in $items) {
+        $row = New-Object Windows.Controls.DockPanel
+        $row.Margin = '0,3,0,3'
+        $right = New-Object Windows.Controls.StackPanel
+        $right.Orientation = 'Horizontal'; [Windows.Controls.DockPanel]::SetDock($right, 'Right')
+        $sides = Get-HDItemSides $i
+        $scopeKey = if ($sides.Count -gt 1) { 'confirm.scope.mixed' } elseif ($sides -contains 'Machine') { 'confirm.scope.machine' } else { 'confirm.scope.user' }
+        $sc = New-HDText (T $scopeKey) 12 $Colors.Muted
+        $sc.VerticalAlignment = 'Center'
+        [void]$right.Children.Add($sc)
+        [void]$right.Children.Add((New-HDBadge (T "risk.$($i.Risk)") $RiskStyle[$i.Risk].Bg $RiskStyle[$i.Risk].Fg))
+        [void]$row.Children.Add($right)
+        $t = New-HDText $i.Title 14 $Colors.Ink 'SemiBold'
+        $t.VerticalAlignment = 'Center'
+        [void]$row.Children.Add($t)
+        [void]$c.Stack.Children.Add($row)
+        foreach ($w in $i.Warnings) {
+            $wt = New-HDText ('(!) ' + $w) 12 $Colors.Wing
+            $wt.Margin = '12,0,0,4'
+            [void]$c.Stack.Children.Add($wt)
+        }
+    }
+    [void]$UI.FlowPanel.Children.Add($c.Outer)
+
+    $UI.FlowStatus.Text = if ($machine.Count) { T 'confirm.status.uac' $machine.Count } else { T 'confirm.status.user' }
+    [void]$UI.FlowButtons.Children.Add((New-HDButton (T 'ui.cancel') { Hide-HDFlow }))
+    [void]$UI.FlowButtons.Children.Add((New-HDButton (T 'confirm.go') { Start-HDUiRun } -Primary))
+}
+
+# ---- 2. running (worker + user side), shared by apply and undo
+
+function Start-HDUiRun {
+    $ids = @($State.Scan.Items | Where-Object { $_.Selectable -and $State.Selection[$_.Id] } | ForEach-Object { $_.Id })
+    try { $dir = New-HDRun -Scan $State.Scan -Ids $ids }
+    catch { [void][Windows.MessageBox]::Show($Window, (T 'ui.error.run' $_.Exception.Message), (T 'ui.appname'), 'OK', 'Error'); return }
+    $State.Run = @{ Kind = 'Apply'; Dir = $dir; Phase = 'Worker'; Answered = 0; Proc = $null; Status = (Join-Path $dir 'machine\status.json') }
+    Show-HDProgress (T 'run.title') (T 'run.sub')
+    $UI.ScanStep.Text = T 'run.uac'
+    $Window.Dispatcher.Invoke([action] {}, [Windows.Threading.DispatcherPriority]::Background)
+    $proc = Start-HDWorker @{ Mode = 'Apply'; RunDir = $dir; Lang = $Lang }
+    if (-not $proc) {
+        Save-HDRunState $dir @{ Worker = 'Cancelled' }
+        $ans = [Windows.MessageBox]::Show($Window, (T 'run.uac.cancelled'), (T 'ui.appname'), 'YesNo', 'Warning')
+        if ($ans -eq 'Yes') { Start-HDUserSide } else { Complete-HDUiRun -UserSide 'NotRun' }
+        return
+    }
+    $State.Run.Proc = $proc
+    $runTimer.Start()
+}
+
+function Start-HDUiUndo([object[]]$Selection, [int]$Count) {
+    $ans = [Windows.MessageBox]::Show($Window, (T 'undo.confirm' $Count), (T 'ui.appname'), 'YesNo', 'Question')
+    if ($ans -ne 'Yes') { return }
+    $jobDir = New-HDUndoJob $Selection
+    $State.Run = @{ Kind = 'Undo'; Dir = $jobDir; Selection = $Selection; Phase = 'Worker'; Answered = 0; Proc = $null; Status = (Join-Path $jobDir 'status.json') }
+    Show-HDProgress (T 'undo.running') (T 'undo.running.sub')
+    $Window.Dispatcher.Invoke([action] {}, [Windows.Threading.DispatcherPriority]::Background)
+    if (Test-HDUndoNeedsAdmin $Selection) {
+        $UI.ScanStep.Text = T 'run.uac'
+        $proc = Start-HDWorker @{ Mode = 'Undo'; JobDir = $jobDir; Lang = $Lang }
+        if ($proc) { $State.Run.Proc = $proc; $runTimer.Start(); return }
+        [void][Windows.MessageBox]::Show($Window, (T 'undo.uac.cancelled'), (T 'ui.appname'), 'OK', 'Warning')
+    }
+    Start-HDUserSide
+}
+
+function Show-HDConsent($RestorePoint) {
+    # Returns Enable / Continue / Cancel
+    if ($RestorePoint.Status -eq 'Disabled') {
+        $ans = [Windows.MessageBox]::Show($Window, (T 'consent.disabled' $RestorePoint.Reason), (T 'consent.title'), 'YesNoCancel', 'Warning')
+        switch ($ans) { 'Yes' { return 'Enable' } 'No' { return 'Continue' } default { return 'Cancel' } }
+    }
+    $ans = [Windows.MessageBox]::Show($Window, (T 'consent.failed' $RestorePoint.Reason), (T 'consent.title'), 'YesNo', 'Warning')
+    if ($ans -eq 'Yes') { return 'Continue' }
+    return 'Cancel'
+}
+
+function Start-HDUserSide {
+    $r = $State.Run
+    $r.Phase = 'User'
+    $UI.ScanStep.Text = T 'run.user'
+    $sync = [hashtable]::Synchronized(@{ Text = ''; Done = $false; Error = $null })
+    $rs = [runspacefactory]::CreateRunspace()
+    $rs.ApartmentState = 'STA'
+    $rs.Open()
+    $ps = [powershell]::Create()
+    $ps.Runspace = $rs
+    [void]$ps.AddScript({
+            param($AppDir, $Lang, $sync, $Kind, $Dir, $Selection)
+            try {
+                foreach ($f in 'Lang', 'Scan', 'Report', 'Backup', 'Safety', 'Apply', 'Undo') { . (Join-Path $AppDir "core\$f.ps1") }
+                foreach ($f in Get-ChildItem (Join-Path $AppDir 'handlers') -Filter *.ps1) { . $f.FullName }
+                Initialize-HDLang $Lang
+                $prog = { param($p) if ($p.Text) { $sync.Text = $p.Text } }
+                if ($Kind -eq 'Apply') {
+                    $sync.Text = T 'run.rescan'
+                    $plan = Read-HDJson (Join-Path $Dir 'plan.json')
+                    $scan = Invoke-HDScan
+                    $sel = Select-HDPlanItems -Scan $scan -Plan $plan -Side 'User'
+                    $refuse = if ($scan.OtherUser) { T 'reason.otheruser' @($scan.OtherUser.Me, $scan.OtherUser.Desktop) } else { '' }
+                    $null = Invoke-HDApplySide -RunDir $Dir -Side 'User' -Items $sel.Items -Refused $sel.Refused -RefuseAll $refuse -Progress $prog
+                } else {
+                    $jobId = Split-Path $Dir -Leaf
+                    foreach ($s in $Selection) {
+                        $null = Invoke-HDUndoSide -RunDir (Join-Path (Get-HDRunsRoot) $s.RunId) -Side 'User' -ItemIds @($s.Items) -JobId $jobId -Progress $prog
+                    }
+                }
+            } catch { $sync.Error = $_.ToString() + "`n" + $_.ScriptStackTrace }
+            $sync.Done = $true
+        }).AddArgument($AppDir).AddArgument($Lang).AddArgument($sync).AddArgument($r.Kind).AddArgument($r.Dir).AddArgument($r.Selection)
+    $r.User = @{ Sync = $sync; PS = $ps; RS = $rs; Handle = $ps.BeginInvoke() }
+    $runTimer.Start()
+}
+
+function Complete-HDUiRun([string]$UserSide = 'Done') {
+    $runTimer.Stop()
+    $r = $State.Run
+    if ($r.User) {
+        try { [void]$r.User.PS.EndInvoke($r.User.Handle) } catch {}
+        $r.User.PS.Dispose(); $r.User.RS.Dispose()
+        if ($r.User.Sync.Error) { [void][Windows.MessageBox]::Show($Window, (T 'ui.error.run' $r.User.Sync.Error), (T 'ui.appname'), 'OK', 'Error') }
+    }
+    $State.Run = $null
+    Hide-HDProgress
+    if ($r.Kind -eq 'Apply') {
+        Save-HDRunState $r.Dir @{ UserSide = $UserSide; FinishedAt = (Get-Date).ToString('s') }
+        Show-HDRunResult (Update-HDManifest $r.Dir)
+    } else {
+        Show-HDUndoResult (Get-HDUndoJobResult $r.Dir)
+    }
+}
+
+$runTimer = New-Object Windows.Threading.DispatcherTimer
+$runTimer.Interval = [TimeSpan]::FromMilliseconds(300)
+$runTimer.Add_Tick({
+        $r = $State.Run
+        if (-not $r) { $runTimer.Stop(); return }
+        if ($r.Phase -eq 'Worker') {
+            $s = $null
+            try { $s = Read-HDJson $r.Status } catch {}
+            if ($s) {
+                $UI.ScanStep.Text = switch ($s.Phase) {
+                    'Applying' { T 'run.item' @(([int]$s.Done + 1), $s.Total, $s.Text) }
+                    'Undoing'  { T 'run.item' @(([int]$s.Done + 1), $s.Total, $s.Text) }
+                    default    { $s.Text }
+                }
+                if ($s.Phase -eq 'NeedConsent' -and [int]$s.Ask -gt $r.Answered) {
+                    $runTimer.Stop()
+                    $r.Answered = [int]$s.Ask
+                    Set-HDConsent -RunDir $r.Dir -Ask $r.Answered -Choice (Show-HDConsent $s.RestorePoint)
+                    $runTimer.Start()
+                    return
+                }
+            }
+            if (-not (Test-HDProcessExited $r.Proc)) { return }
+            $runTimer.Stop()
+            if ($r.Kind -eq 'Undo') { Start-HDUserSide; return }
+            $phase = if ($s) { [string]$s.Phase } else { '' }
+            $ws = switch ($phase) { 'Done' { 'Done' } 'Cancelled' { 'Declined' } default { 'Failed' } }
+            Save-HDRunState $r.Dir @{ Worker = $ws }
+            if ($ws -eq 'Declined') { Complete-HDUiRun -UserSide 'NotRun'; return }
+            if ($ws -eq 'Failed') {
+                $msg = if ($s) { $s.Text } else { T 'reason.workerfailed' }
+                $ans = [Windows.MessageBox]::Show($Window, (T 'run.worker.failed' $msg), (T 'ui.appname'), 'YesNo', 'Warning')
+                if ($ans -ne 'Yes') { Complete-HDUiRun -UserSide 'NotRun'; return }
+            }
+            Start-HDUserSide
+            return
+        }
+        if ($r.Phase -eq 'User') {
+            if ($r.User.Sync.Text) { $UI.ScanStep.Text = $r.User.Sync.Text }
+            if ($r.User.Sync.Done) { Complete-HDUiRun }
+        }
+    })
+
+# ---- 3. result of a run
+
+function Add-HDResultCard($Item, [string]$Result, [object[]]$Reasons, [object[]]$Units, [object[]]$Links) {
+    $c = New-HDPanelCard
+    $head = New-Object Windows.Controls.DockPanel
+    $rs = $ResultStyle[$Result]
+    $badge = New-HDBadge (T "result.$Result") $rs.Bg $rs.Fg
+    [Windows.Controls.DockPanel]::SetDock($badge, 'Right')
+    [void]$head.Children.Add($badge)
+    [void]$head.Children.Add((New-HDText $Item.Title 15 $Colors.Ink 'Bold'))
+    [void]$c.Stack.Children.Add($head)
+    foreach ($r in @($Reasons)) {
+        $t = New-HDText $r 12.5 $(if ($Result -eq 'Failed') { $Colors.Wing } else { $Colors.Muted })
+        $t.Margin = '0,4,0,0'
+        [void]$c.Stack.Children.Add($t)
+    }
+    foreach ($l in @($Links)) {
+        if (-not $l) { continue }
+        $b = New-HDButton (T 'undo.store') { param($s, $e) try { Start-Process $s.Tag } catch {} } -Tag $l
+        $b.HorizontalAlignment = 'Left'; $b.Margin = '0,8,0,0'
+        [void]$c.Stack.Children.Add($b)
+    }
+    if (@($Units).Count) {
+        $exp = New-Object Windows.Controls.Expander
+        $exp.Header = T 'run.details'; $exp.Margin = '0,6,0,0'; $exp.FontSize = 12; $exp.Foreground = New-HDBrush $Colors.Navy
+        $lines = foreach ($u in @($Units)) {
+            '{0}  [{1}]' -f $u.Label, (T "result.$($u.Result)")
+            '    {0}: {1}' -f (T 'run.col.before'), (Format-HDState $u.Before)
+            if ($u.After) { '    {0}: {1}' -f (T 'run.col.after'), (Format-HDState $u.After) }
+            if ($u.Undo) { '    {0}: {1} {2}' -f (T 'run.col.undo'), (T "result.$($u.Undo.Result)"), $u.Undo.Reason }
+        }
+        $dt = New-HDText (@($lines) -join "`n") 11.5 $Colors.Muted
+        $dt.FontFamily = 'Consolas'; $dt.Margin = '18,4,0,0'
+        $exp.Content = $dt
+        [void]$c.Stack.Children.Add($exp)
+    }
+    [void]$UI.FlowPanel.Children.Add($c.Outer)
+}
+
+function Show-HDRunResult($M) {
+    if (-not $M) { Hide-HDFlow; Start-HDScan; return }
+    $items = @($M.Items)
+    $ok = @($items | Where-Object Result -eq 'Success').Count
+    $skip = @($items | Where-Object Result -eq 'Skipped').Count
+    $fail = @($items | Where-Object Result -eq 'Failed').Count
+    Show-HDFlow (T 'result.title') (T 'result.summary' @($ok, $skip, $fail))
+    $rp = $M.RestorePoint
+    if ($rp -and $rp.Status -eq 'Created') { Add-HDFlowNote (T 'run.rp.ok' $rp.Sequence) $Colors.SlateLight }
+    elseif ($rp) { Add-HDFlowNote (T 'rp.failed' $rp.Reason) '#FFF6E6' $Colors.Wing }
+    else { Add-HDFlowNote (T 'run.rp.none') '#FFF6E6' $Colors.Wing }
+    if ($items | Where-Object { $_.Restart }) { Add-HDFlowNote (T 'result.restart') }
+    foreach ($i in $items) { Add-HDResultCard $i $i.Result $i.Reasons $i.Units }
+    $UI.FlowStatus.Text = T 'run.report.folder' $M.Folder
+    $folder = $M.Folder
+    $b1 = New-HDButton (T 'result.folder') { param($s, $e) Start-Process explorer.exe -ArgumentList ('"{0}"' -f $s.Tag) } -Tag $folder
+    $b2 = New-HDButton (T 'result.report') { param($s, $e) Start-Process (Join-Path $s.Tag 'report.html') } -Tag $folder
+    [void]$UI.FlowButtons.Children.Add($b1)
+    [void]$UI.FlowButtons.Children.Add($b2)
+    [void]$UI.FlowButtons.Children.Add((New-HDButton (T 'result.done') { Hide-HDFlow; Start-HDScan } -Primary))
+}
+
+# ---- 4. history and undo
+
+function Show-HDUndoScreen {
+    $runs = @(Get-HDRunList | Where-Object { @($_.Items | Where-Object { $_.UndoState -ne 'None' }).Count })
+    Show-HDFlow (T 'undo.title') (T 'undo.sub')
+    $all = @()
+    foreach ($m in $runs) {
+        $active = @($m.Items | Where-Object { $_.UndoState -in 'Active', 'Partial' })
+        if ($active.Count) { $all += @{ RunId = $m.RunId; Items = @('*') } }
+        $c = New-HDPanelCard
+        $head = New-Object Windows.Controls.DockPanel
+        if ($active.Count) {
+            $b = New-HDButton (T 'undo.run' $active.Count) { param($s, $e) Start-HDUiUndo @(@{ RunId = $s.Tag.RunId; Items = @('*') }) $s.Tag.Count } -Tag @{ RunId = $m.RunId; Count = $active.Count }
+            [Windows.Controls.DockPanel]::SetDock($b, 'Right')
+            [void]$head.Children.Add($b)
+        }
+        $when = try { ([datetime]$m.CreatedAt).ToString('dd MMM yyyy HH:mm') } catch { $m.CreatedAt }
+        $ht = New-HDText (T 'undo.run.title' @($when, $m.RunId)) 16 $Colors.Ink 'Bold'
+        $ht.VerticalAlignment = 'Center'
+        [void]$head.Children.Add($ht)
+        [void]$c.Stack.Children.Add($head)
+        $rp = $m.RestorePoint
+        $rpText = if ($rp -and $rp.Status -eq 'Created') { T 'run.rp.ok' $rp.Sequence } elseif ($rp) { T 'rp.failed' $rp.Reason } else { T 'run.rp.none' }
+        $rpt = New-HDText $rpText 12 $Colors.Muted
+        $rpt.Margin = '0,2,0,6'
+        [void]$c.Stack.Children.Add($rpt)
+        foreach ($i in @($m.Items | Where-Object { $_.UndoState -ne 'None' })) {
+            $row = New-Object Windows.Controls.DockPanel
+            $row.Margin = '0,4,0,4'
+            $right = New-Object Windows.Controls.StackPanel
+            $right.Orientation = 'Horizontal'; [Windows.Controls.DockPanel]::SetDock($right, 'Right')
+            $stColor = if ($i.UndoState -eq 'Undone') { $Colors.Muted } else { $Colors.Navy }
+            $st = New-HDText (T "undo.state.$($i.UndoState)") 12 $stColor 'SemiBold'
+            $st.VerticalAlignment = 'Center'
+            [void]$right.Children.Add($st)
+            if ($i.UndoState -in 'Active', 'Partial') {
+                $b = New-HDButton (T 'undo.item') { param($s, $e) Start-HDUiUndo @(@{ RunId = $s.Tag.RunId; Items = @($s.Tag.Id) }) 1 } -Tag @{ RunId = $m.RunId; Id = $i.Id }
+                $b.Padding = '12,4'
+                [void]$right.Children.Add($b)
+            }
+            [void]$row.Children.Add($right)
+            $t = New-HDText $i.Title 14 $Colors.Ink
+            $t.VerticalAlignment = 'Center'
+            [void]$row.Children.Add($t)
+            [void]$c.Stack.Children.Add($row)
+        }
+        [void]$UI.FlowPanel.Children.Add($c.Outer)
+    }
+    if (-not $runs.Count) { Add-HDFlowNote (T 'undo.none') $Colors.SlateLight }
+    $UI.FlowStatus.Text = T 'undo.folder' (Get-HDRunsRoot)
+    [void]$UI.FlowButtons.Children.Add((New-HDButton (T 'ui.close') { Hide-HDFlow }))
+    if ($all.Count) {
+        $n = @($runs | ForEach-Object { @($_.Items | Where-Object { $_.UndoState -in 'Active', 'Partial' }) }).Count
+        [void]$UI.FlowButtons.Children.Add((New-HDButton (T 'undo.all' $n) { param($s, $e) Start-HDUiUndo $s.Tag.Sel $s.Tag.Count } -Primary -Tag @{ Sel = $all; Count = $n }))
+    }
+}
+
+function Show-HDUndoResult([object[]]$Results) {
+    $ok = @($Results | Where-Object Result -eq 'Success').Count
+    $skip = @($Results | Where-Object Result -eq 'Skipped').Count
+    $fail = @($Results | Where-Object Result -eq 'Failed').Count
+    Show-HDFlow (T 'undo.result.title') (T 'result.summary' @($ok, $skip, $fail))
+    if ($Results | Where-Object { $_.Restart }) { Add-HDFlowNote (T 'result.restart') }
+    foreach ($r in $Results) { Add-HDResultCard $r $r.Result $r.Reasons @() $r.Links }
+    if (-not @($Results).Count) { Add-HDFlowNote (T 'undo.nothing') $Colors.SlateLight }
+    [void]$UI.FlowButtons.Children.Add((New-HDButton (T 'undo.back') { Show-HDUndoScreen }))
+    [void]$UI.FlowButtons.Children.Add((New-HDButton (T 'result.done') { Hide-HDFlow; Start-HDScan } -Primary))
+}
+
 # ------------------------------------------------------------------ events
 
 $UI.NavList.Add_SelectionChanged({
@@ -338,6 +810,15 @@ $UI.NavList.Add_SelectionChanged({
     })
 $UI.ChkShowAll.Add_Click({ if ($State.Scan) { Update-HDNav; Show-HDCategory $State.Category } })
 $UI.BtnRescan.Add_Click({ if (-not $State.Job) { Start-HDScan } })
+$UI.BtnRun.Add_Click({ if ($State.Scan -and -not $State.Run) { Show-HDConfirm } })
+$UI.BtnUndo.Add_Click({ if (-not $State.Run) { Show-HDUndoScreen } })
+$Window.Add_Closing({
+        param($s, $e)
+        if ($State.Run) {
+            [void][Windows.MessageBox]::Show($Window, (T 'run.busy'), (T 'ui.appname'), 'OK', 'Information')
+            $e.Cancel = $true
+        }
+    })
 $UI.BtnAdmin.Add_Click({
         try {
             $args2 = @('-NoProfile', '-STA', '-ExecutionPolicy', 'Bypass', '-WindowStyle', 'Hidden', '-File', "`"$PSCommandPath`"", '-Lang', $Lang)
