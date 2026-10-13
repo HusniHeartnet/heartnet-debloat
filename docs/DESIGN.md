@@ -1,6 +1,14 @@
-# Heartnet Debloat: Design Doc (draft v0.1)
+# Heartnet Debloat: Design Doc (v0.2)
 
-Status: **draft, belum disetujui**. Sumber: 8 script di `reference/scripts-tested/` (sudah teruji di Lenovo LOQ 83JC).
+Status: **disetujui (2026-10-13)**.
+
+Keputusan:
+- **PowerShell 5.1 + WPF**
+- **open source** (kode MIT, maskot tidak termasuk; lihat NOTICE), dirilis di GitHub
+- Office cukup panduan + link resmi
+- maskot kucing (bagian 7)
+
+Sumber: 8 script di `reference/scripts-tested/` (sudah teruji di Lenovo LOQ 83JC).
 Script itu hanya referensi. Aplikasinya **generik**: semua item dideteksi dulu di PC yang sedang dipakai.
 
 ## 1. Prinsip
@@ -254,9 +262,22 @@ Bahan yang masih perlu dibuat dari gambar ini:
 - `.ico` multi-size
 - varian ekspresi (bisa dibuat belakangan; MVP cukup pakai satu gambar)
 
-## 8. Rencana kerja
-1. **Sekarang:** design doc ini disetujui.
-2. **MVP Scan** (sesi ini):
+## 8. Temuan saat membangun MVP scan (2026-10-13)
+
+1. **Tanpa admin, sebagian scheduled task tidak terlihat.** Contoh: 1 dari 2 task `\Lenovo\UDC\` dan semua task `\Lenovo\ImController\`. Karena itu:
+   - Scan tetap bisa jalan tanpa admin.
+   - UI menampilkan alasannya dan tombol **Scan sebagai admin** (tetap read-only).
+2. **Admin akun lain.** Kalau proses elevated dijalankan oleh akun admin yang berbeda dari pemilik `explorer.exe`, scan menampilkan peringatan `warn.otheruser`.
+3. **Printer.** `Win32_Printer` error kalau Spooler mati. Deteksi printer dibaca dari `HKLM\...\Control\Print\Printers` + `HKCU\Printers\Connections`.
+4. **Jenis disk.** `Get-PhysicalDisk` butuh admin. Kalau jenis disk tidak diketahui, item SysMain diberi peringatan, bukan diam saja.
+5. **Radio Bluetooth.** Dideteksi lewat prefix InstanceId (USB\, PCI\, bukan BTH*\ atau SWD\), bukan dari kata "Adapter". Nama adapter Intel tidak mengandung "Adapter".
+6. **Entri startup yang diproteksi.** Exe di `System32`/`DriverStore`, ditambah daftar `StartupExe` (SecurityHealth, Realtek, dll.), tetap ditampilkan tapi diblokir.
+7. **Task telemetri aktif lagi.** Di laptop referensi, 8 task telemetri yang dimatikan di tahap 6 sekarang berstatus **Ready** lagi. Mungkin di-enable ulang oleh Windows, mungkin dulu gagal tanpa ketahuan. Ini bukti kenapa verify-after dan scan ulang penting.
+8. **Bug PS 5.1:** `ConvertTo-JSON` membungkus array jadi `{value, Count}`. Export memakai hashtable + `[object[]]`.
+
+## 9. Rencana kerja
+1. ~~Design doc disetujui.~~ Selesai.
+2. ~~**MVP Scan**~~ Selesai (v0.1.0-scan):
    - engine scan + katalog (deteksi saja) + probe
    - jendela WPF: daftar per kategori, badge risiko, penjelasan, checkbox default, panel peringatan (KFM dll.), panel info keamanan
    - export laporan JSON/HTML
@@ -264,8 +285,6 @@ Bahan yang masih perlu dibuat dari gambar ini:
 3. Backup + Apply + Undo per handler. Dites di **Windows Sandbox / VM Hyper-V** (Sandbox belum aktif di PC ini, Hyper-V sudah), bukan di laptop utama.
 4. Bahasa Inggris, vendor OEM lain, signing, rilis.
 
-## 9. Pertanyaan untuk kamu
-1. Setuju PowerShell 5.1 + WPF?
-2. Rencana rilis: open source (GitHub, gratis), gratis tapi tertutup, atau berbayar? Ini berpengaruh ke lisensi dan cara membangun kepercayaan.
-3. Office: cukup panduan + link resmi (rekomendasi), atau tetap dicoba otomatis dengan opsi "eksperimen"?
-4. Maskotnya mau dikasih nama? Gambar ini juga aman dipakai untuk produk komersial? (Kalau buatan AI atau orang lain, cek dulu lisensinya.)
+## 10. Pertanyaan terbuka
+1. Nama maskot?
+2. Hak pakai gambar maskot: sudah dipastikan aman untuk dirilis publik?

@@ -1,0 +1,146 @@
+<Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Heartnet Debloat" Width="1080" Height="760" MinWidth="820" MinHeight="560"
+        WindowStartupLocation="CenterScreen" Background="#ECF6F7" FontFamily="Segoe UI" FontSize="14"
+        UseLayoutRounding="True" TextOptions.TextFormattingMode="Display">
+    <Window.Resources>
+        <SolidColorBrush x:Key="Ink" Color="#2E1E1F"/>
+        <SolidColorBrush x:Key="Plum" Color="#3E263C"/>
+        <SolidColorBrush x:Key="PlumLight" Color="#6A2D4E"/>
+        <SolidColorBrush x:Key="Wing" Color="#761D31"/>
+        <SolidColorBrush x:Key="Slate" Color="#708DAB"/>
+        <SolidColorBrush x:Key="Paper" Color="#ECF6F7"/>
+        <SolidColorBrush x:Key="Amber" Color="#E3A33B"/>
+        <SolidColorBrush x:Key="Blush" Color="#C47B84"/>
+
+        <Style x:Key="HDButton" TargetType="Button">
+            <Setter Property="Foreground" Value="#2E1E1F"/>
+            <Setter Property="Background" Value="White"/>
+            <Setter Property="FontWeight" Value="SemiBold"/>
+            <Setter Property="Padding" Value="16,7"/>
+            <Setter Property="Margin" Value="8,0,0,0"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Grid>
+                            <Border CornerRadius="10" Background="#2E1E1F" Margin="3,3,0,0"/>
+                            <Border x:Name="Face" CornerRadius="10" Background="{TemplateBinding Background}" BorderBrush="#2E1E1F"
+                                    BorderThickness="2" Margin="0,0,3,3" Padding="{TemplateBinding Padding}">
+                                <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                            </Border>
+                        </Grid>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Face" Property="Background" Value="#F6E9EE"/>
+                            </Trigger>
+                            <Trigger Property="IsPressed" Value="True">
+                                <Setter TargetName="Face" Property="Margin" Value="2,2,1,1"/>
+                            </Trigger>
+                            <Trigger Property="IsEnabled" Value="False">
+                                <Setter TargetName="Face" Property="Opacity" Value="0.55"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <Style x:Key="NavItem" TargetType="ListBoxItem">
+            <Setter Property="Margin" Value="0,0,0,6"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ListBoxItem">
+                        <Border x:Name="Bd" CornerRadius="10" Padding="12,8" Background="Transparent" BorderThickness="2" BorderBrush="Transparent">
+                            <ContentPresenter/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Bd" Property="Background" Value="#4E3149"/>
+                            </Trigger>
+                            <Trigger Property="IsSelected" Value="True">
+                                <Setter TargetName="Bd" Property="Background" Value="#ECF6F7"/>
+                                <Setter TargetName="Bd" Property="BorderBrush" Value="#2E1E1F"/>
+                                <Setter Property="Foreground" Value="#2E1E1F"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+            <Setter Property="Foreground" Value="#ECF6F7"/>
+        </Style>
+    </Window.Resources>
+
+    <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+
+        <!-- Header -->
+        <Border Grid.Row="0" Background="{StaticResource Plum}" BorderBrush="{StaticResource Ink}" BorderThickness="0,0,0,3" Padding="16,10">
+            <DockPanel>
+                <Image x:Name="HeaderMascot" Width="64" Height="64" DockPanel.Dock="Left" RenderOptions.BitmapScalingMode="HighQuality"/>
+                <StackPanel DockPanel.Dock="Right" VerticalAlignment="Center" HorizontalAlignment="Right">
+                    <TextBlock x:Name="PcInfo" Foreground="#E9D8E4" FontSize="12" HorizontalAlignment="Right"/>
+                    <Border Background="{StaticResource Amber}" BorderBrush="{StaticResource Ink}" BorderThickness="1.5" CornerRadius="9"
+                            Padding="9,1" Margin="0,6,0,0" HorizontalAlignment="Right">
+                        <TextBlock x:Name="MvpLabel" FontSize="11" FontWeight="SemiBold" Foreground="{StaticResource Ink}"/>
+                    </Border>
+                </StackPanel>
+                <StackPanel VerticalAlignment="Center" Margin="12,0,0,0">
+                    <TextBlock x:Name="AppTitle" Foreground="#ECF6F7" FontSize="24" FontWeight="Black"/>
+                    <TextBlock x:Name="Tagline" Foreground="{StaticResource Blush}" FontSize="13"/>
+                </StackPanel>
+            </DockPanel>
+        </Border>
+
+        <!-- Main area -->
+        <Grid Grid.Row="1" x:Name="MainArea">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="250"/>
+                <ColumnDefinition Width="*"/>
+            </Grid.ColumnDefinitions>
+            <Border Grid.Column="0" Background="{StaticResource Plum}" Padding="10,12">
+                <ListBox x:Name="NavList" Background="Transparent" BorderThickness="0" ItemContainerStyle="{StaticResource NavItem}"
+                         ScrollViewer.HorizontalScrollBarVisibility="Disabled"/>
+            </Border>
+            <ScrollViewer Grid.Column="1" x:Name="CardScroll" VerticalScrollBarVisibility="Auto" Padding="20,16,16,16">
+                <StackPanel x:Name="CardPanel"/>
+            </ScrollViewer>
+        </Grid>
+
+        <!-- Scanning overlay -->
+        <Grid Grid.Row="1" x:Name="ScanOverlay" Background="{StaticResource Paper}">
+            <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center">
+                <Image x:Name="ScanMascot" Width="220" Height="220" RenderOptions.BitmapScalingMode="HighQuality"/>
+                <TextBlock x:Name="ScanTitle" FontSize="20" FontWeight="Bold" Foreground="{StaticResource Ink}" HorizontalAlignment="Center" Margin="0,12,0,0"/>
+                <TextBlock x:Name="ScanSub" FontSize="13" Foreground="#5B4B4C" HorizontalAlignment="Center" Margin="0,4,0,0"/>
+                <Border BorderBrush="{StaticResource Ink}" BorderThickness="2" CornerRadius="8" Width="280" Height="16" Margin="0,16,0,0" Background="White">
+                    <ProgressBar x:Name="ScanProgress" IsIndeterminate="True" Foreground="{StaticResource Slate}" Background="Transparent" BorderThickness="0"/>
+                </Border>
+                <TextBlock x:Name="ScanStep" FontSize="12" Foreground="#5B4B4C" HorizontalAlignment="Center" Margin="0,8,0,0"/>
+            </StackPanel>
+        </Grid>
+
+        <!-- Footer -->
+        <Border Grid.Row="2" Background="White" BorderBrush="{StaticResource Ink}" BorderThickness="0,3,0,0" Padding="16,10">
+            <DockPanel>
+                <StackPanel Orientation="Horizontal" DockPanel.Dock="Right">
+                    <Button x:Name="BtnAdmin" Style="{StaticResource HDButton}" Background="#E3A33B" Visibility="Collapsed"/>
+                    <Button x:Name="BtnRescan" Style="{StaticResource HDButton}"/>
+                    <Button x:Name="BtnSave" Style="{StaticResource HDButton}"/>
+                    <Button x:Name="BtnRun" Style="{StaticResource HDButton}" Background="{StaticResource PlumLight}" Foreground="White"
+                            IsEnabled="False" ToolTipService.ShowOnDisabled="True"/>
+                </StackPanel>
+                <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                    <CheckBox x:Name="ChkShowAll" VerticalAlignment="Center" Foreground="{StaticResource Ink}"/>
+                    <TextBlock x:Name="SelectedCount" Margin="20,0,0,0" VerticalAlignment="Center" FontWeight="SemiBold" Foreground="{StaticResource PlumLight}"/>
+                    <TextBlock x:Name="StatusText" Margin="20,0,0,0" VerticalAlignment="Center" FontSize="12" Foreground="#5B4B4C" TextTrimming="CharacterEllipsis"/>
+                </StackPanel>
+            </DockPanel>
+        </Border>
+    </Grid>
+</Window>
