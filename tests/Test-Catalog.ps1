@@ -114,6 +114,74 @@ foreach ($f in Get-ChildItem $root -Recurse -Include *.ps1, *.psd1, *.xaml, *.cm
 }
 try { [void][xml](Get-Content (Join-Path $app 'ui\MainWindow.xaml') -Raw) } catch { Fail "MainWindow.xaml is not valid XML: $_" }
 
+# ------------------------------------------------------------------ handlers (backup / apply / undo)
+# Load the code without running anything that touches the system.
+foreach ($f in 'Lang', 'Scan', 'Backup', 'Safety', 'Apply', 'Undo', 'Report') { . (Join-Path $app "core\$f.ps1") }
+foreach ($f in Get-ChildItem (Join-Path $app 'handlers') -Filter *.ps1) { . $f.FullName }
+Initialize-HDLang 'id'
+
+$blocks = 'Side', 'Expand', 'Read', 'IsDone', 'Backup', 'Apply', 'Undo', 'IsRestored'
+foreach ($t in $types + 'Startup', 'Path') {
+    $h = $script:HDHandlers[$t]
+    if (-not $h) { Fail "no handler for target type '$t'"; continue }
+    foreach ($b in $blocks) { if ($h[$b] -isnot [scriptblock]) { Fail "handler '$t' has no '$b' script block" } }
+}
+foreach ($i in $catalog.Items) {
+    foreach ($t in @($i.Targets)) {
+        if ($t.T -eq 'Task' -and $t.Mode -and $t.Mode -notin 'Disable', 'Remove') { Fail "item '$($i.Id)' task Mode '$($t.Mode)' must be Disable or Remove" }
+        if ($t.T -eq 'Reg' -and $t.Kind -and -not [enum]::IsDefined([Microsoft.Win32.RegistryValueKind], [string]$t.Kind)) { Fail "item '$($i.Id)' has unknown registry Kind '$($t.Kind)'" }
+        # The run-time safety check must agree with the static one: every catalog target is allowed.
+        $unit = switch ($t.T) {
+            'Service'  { @{ Type = 'Service'; Name = $t.Name } }
+            'Appx'     { @{ Type = 'Appx'; Name = $t.Name } }
+            'Reg'      { & $script:HDHandlers['Reg'].Expand $t }
+            'Task'     { @{ Type = 'Task'; TaskPath = $(if ($t.Path) { $t.Path } else { '\' }); TaskName = $t.Name } }
+            default    { $null }
+        }
+        if ($unit) { $why = Test-HDUnitAllowed $unit; if ($why) { Fail "item '$($i.Id)' is refused at run time: $why" } }
+    }
+}
+foreach ($k in 'confirm.scope.user', 'confirm.scope.machine', 'confirm.scope.mixed') { if (-not $id.ContainsKey($k)) { Fail "missing text '$k'" } }
+foreach ($r in 'Success', 'Skipped', 'Failed', 'Pending') { if (-not $id.ContainsKey("result.$r")) { Fail "missing text 'result.$r'" } }
+foreach ($s in 'Active', 'Undone', 'Partial', 'None') { if (-not $id.ContainsKey("undo.state.$s")) { Fail "missing text 'undo.state.$s'" } }
+
+# Safety: protected things are refused at run time.
+$refuse = @(
+    @{ Type = 'Service'; Name = 'WinDefend' }, @{ Type = 'Service'; Name = 'wuauserv' }
+    @{ Type = 'Task'; TaskPath = '\Microsoft\Windows\WindowsUpdate\'; TaskName = 'Scheduled Start' }
+    @{ Type = 'Appx'; Name = 'Microsoft.WindowsStore' }
+    @{ Type = 'Reg'; Path = 'HKLM:\SOFTWARE\Policies\Microsoft\Windows Defender'; Name = 'DisableAntiSpyware' }
+    @{ Type = 'Reg'; Path = 'HKLM:\SYSTEM\CurrentControlSet\Services\WinDefend'; Name = 'Start' }
+    @{ Type = 'Path'; Path = $env:ProgramData }, @{ Type = 'Path'; Path = "$env:SystemRoot\System32\drivers" }, @{ Type = 'Path'; Path = 'C:\' }
+    @{ Type = 'Startup'; Name = 'SecurityHealth'; Command = '%windir%\system32\SecurityHealthSystray.exe' }
+    @{ Type = 'BtRadio'; InstanceId = 'BTHENUM\{0000110B-0000-1000-8000-00805F9B34FB}' }
+)
+foreach ($u in $refuse) { if (-not (Test-HDUnitAllowed $u)) { Fail "safety check lets through $($u.Type) $($u.Name)$($u.Path)$($u.TaskName)$($u.InstanceId)" } }
+if (Test-HDUnitAllowed @{ Type = 'Path'; Path = "$env:ProgramData\McAfee" }) { Fail 'safety check refuses %ProgramData%\McAfee' }
+
+# Registry data survives the trip through JSON exactly (undo depends on it).
+$cases = @(
+    @{ Kind = 'DWord'; Value = [int32]0 }, @{ Kind = 'DWord'; Value = [int32]-1 }, @{ Kind = 'DWord'; Value = [int32]4 }
+    @{ Kind = 'QWord'; Value = [int64]::MaxValue }, @{ Kind = 'String'; Value = 'a "b" c' }
+    @{ Kind = 'ExpandString'; Value = '%SystemRoot%\x.exe' }, @{ Kind = 'MultiString'; Value = [string[]]@('one', 'two') }
+    @{ Kind = 'Binary'; Value = [byte[]]@(3, 0, 0, 0, 255, 16) }
+)
+foreach ($c in $cases) {
+    $data = ConvertTo-HDRegData $c.Value $c.Kind
+    $back = ConvertFrom-HDRegData ((@{ D = $data } | ConvertTo-Json -Depth 4 | ConvertFrom-Json).D) $c.Kind
+    if (((@($back) | ForEach-Object { [string]$_ }) -join ',') -ne ((@($c.Value) | ForEach-Object { [string]$_ }) -join ',') -or $back.GetType() -ne $c.Value.GetType()) {
+        Fail "registry $($c.Kind) value '$($c.Value)' does not survive JSON (got '$back' $($back.GetType().Name))"
+    }
+}
+
+# Item result logic
+$r = Get-HDItemResult -Units @(@{ Label = 'a'; Result = 'Success' }, @{ Label = 'b'; Result = 'Skipped'; Reason = 'x' })
+if ($r.Result -ne 'Success') { Fail "item result: Success+Skipped should be Success, got $($r.Result)" }
+$r = Get-HDItemResult -Units @(@{ Label = 'a'; Result = 'Success' }, @{ Label = 'b'; Result = 'Failed'; Reason = 'x' })
+if ($r.Result -ne 'Failed') { Fail "item result: Success+Failed should be Failed, got $($r.Result)" }
+$r = Get-HDItemResult -Units @() -MissingReasons @('no admin')
+if ($r.Result -ne 'Skipped' -or $r.Reasons -notcontains 'no admin') { Fail 'item result: no units should be Skipped with the reason' }
+
 # ------------------------------------------------------------------ result
 if ($fail.Count) {
     Write-Host "FAILED ($($fail.Count))" -ForegroundColor Red

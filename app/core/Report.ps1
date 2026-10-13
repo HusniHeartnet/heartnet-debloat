@@ -65,3 +65,67 @@ ul{margin:6px 0 0;padding-left:20px;font-size:12px;color:var(--muted);font-famil
     [void]$sb.Append("<p style='font-size:12px;color:var(--muted)'>Heartnet Debloat $($Scan.Version). Scan ini hanya membaca, tidak ada yang diubah.</p></main></body></html>")
     [IO.File]::WriteAllText($Path, $sb.ToString(), (New-Object System.Text.UTF8Encoding $true))
 }
+
+# Report of one run (apply + any undo), written next to manifest.json.
+function Export-HDRunReport {
+    param($Manifest, [string]$Path)
+    $m = $Manifest
+    $sb = New-Object System.Text.StringBuilder
+    $rp = $m.RestorePoint
+    $rpText = if (-not $rp) { T 'run.rp.none' } elseif ($rp.Status -eq 'Created') { T 'run.rp.ok' $rp.Sequence } else { T 'rp.failed' $rp.Reason }
+    [void]$sb.Append(@"
+<!doctype html><html lang="id"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Heartnet Debloat - $(ConvertTo-HDHtml $m.RunId)</title>
+<style>
+:root{--ink:#2E1E1F;--navy:#3F5F80;--wing:#761D31;--paper:#F4F8FA;--amber:#E3A33B;--muted:#3B4650}
+body{margin:0;background:var(--paper);color:var(--ink);font-family:"Segoe UI",system-ui,sans-serif;line-height:1.5}
+header{background:#fff;padding:20px 24px;border-bottom:3px solid var(--ink)}header h1{margin:0;font-size:22px}header p{margin:4px 0 0;color:var(--muted);font-size:14px}
+main{max-width:960px;margin:0 auto;padding:16px}
+.card{background:#fff;border:2px solid var(--ink);border-radius:12px;box-shadow:3px 3px 0 var(--ink);padding:10px 14px;margin:0 0 12px}
+.card h3{margin:0;font-size:15px;display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.badge{border:1.5px solid var(--ink);border-radius:999px;padding:0 10px;font-size:12px;font-weight:600}
+.Success{background:var(--navy);color:#fff}.Skipped{background:#fff}.Failed{background:var(--wing);color:#fff}.Undone{background:var(--amber)}
+.reason{color:var(--wing);font-size:13px;margin:4px 0 0}
+table{border-collapse:collapse;width:100%;margin-top:6px;font-size:12px;font-family:Consolas,monospace}
+td,th{border-top:1px solid #d5dde3;padding:3px 6px;text-align:left;vertical-align:top;word-break:break-all}th{font-family:"Segoe UI",sans-serif;color:var(--muted)}
+</style></head><body><header><h1>Heartnet Debloat - $(ConvertTo-HDHtml (T 'run.report.title' $m.RunId))</h1>
+<p>$(ConvertTo-HDHtml ('{0} {1} | {2} | {3}' -f $m.Machine.Manufacturer, $m.Machine.Model, $m.User, $m.CreatedAt))</p>
+<p>$(ConvertTo-HDHtml $rpText)</p></header><main>
+"@)
+    foreach ($i in @($m.Items)) {
+        [void]$sb.Append("<div class='card'><h3>$(ConvertTo-HDHtml $i.Title)<span class='badge $($i.Result)'>$(ConvertTo-HDHtml (T "result.$($i.Result)"))</span>")
+        if ($i.UndoState -in 'Undone', 'Partial') { [void]$sb.Append("<span class='badge Undone'>$(ConvertTo-HDHtml (T "undo.state.$($i.UndoState)"))</span>") }
+        [void]$sb.Append('</h3>')
+        foreach ($r in @($i.Reasons)) { [void]$sb.Append("<p class='reason'>$(ConvertTo-HDHtml $r)</p>") }
+        if (@($i.Units).Count) {
+            [void]$sb.Append("<table><tr><th>$(T 'run.col.target')</th><th>$(T 'run.col.before')</th><th>$(T 'run.col.after')</th><th>$(T 'run.col.result')</th><th>$(T 'run.col.undo')</th></tr>")
+            foreach ($u in @($i.Units)) {
+                $undo = if ($u.Undo) { '{0} {1}' -f (T "result.$($u.Undo.Result)"), $u.Undo.Reason } else { '' }
+                [void]$sb.Append(('<tr><td>{0}</td><td>{1}</td><td>{2}</td><td>{3}</td><td>{4}</td></tr>' -f (ConvertTo-HDHtml $u.Label),
+                        (ConvertTo-HDHtml (Format-HDState $u.Before)), (ConvertTo-HDHtml (Format-HDState $u.After)),
+                        (ConvertTo-HDHtml ((T "result.$($u.Result)") + ' ' + $u.Reason)), (ConvertTo-HDHtml $undo)))
+            }
+            [void]$sb.Append('</table>')
+        }
+        [void]$sb.Append('</div>')
+    }
+    [void]$sb.Append("<p style='font-size:12px;color:var(--muted)'>$(ConvertTo-HDHtml (T 'run.report.folder' $m.Folder))</p></main></body></html>")
+    [IO.File]::WriteAllText($Path, $sb.ToString(), (New-Object System.Text.UTF8Encoding $true))
+}
+
+function Format-HDState {
+    # Short one-line text of a handler state (Before/After, as read back from JSON) for reports and the UI.
+    param($State)
+    if ($null -eq $State) { return '' }
+    $props = if ($State -is [System.Collections.IDictionary]) { @($State.Keys | ForEach-Object { @{ Name = $_; Value = $State[$_] } }) }
+             else { @($State.PSObject.Properties | ForEach-Object { @{ Name = $_.Name; Value = $_.Value } }) }
+    $parts = foreach ($p in $props) {
+        $v = $p.Value
+        if ($v -is [array]) {
+            $v = '[' + (@($v | ForEach-Object {
+                        if ($_ -and $_.FullName) { $_.FullName } elseif ($_ -and $_.DisplayName) { $_.DisplayName } else { [string]$_ } }) -join ', ') + ']'
+        }
+        '{0}={1}' -f $p.Name, $v
+    }
+    return (@($parts) -join '; ')
+}

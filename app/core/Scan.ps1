@@ -1,7 +1,8 @@
 # Read-only scan engine. Nothing in this file writes to the system: it only reads
 # the registry, services, scheduled tasks, packages, devices and files.
+# The same detection is used again after every change (verify-after, see core\Apply.ps1).
 
-$script:HDVersion = '0.1.0-scan'
+$script:HDVersion = '0.2.0-dev'
 
 # ============================================================== small readers
 
@@ -220,6 +221,7 @@ function Get-HDArpEntries {
                 DisplayVersion  = [string]$p.DisplayVersion
                 Publisher       = [string]$p.Publisher
                 UninstallString = [string]$p.UninstallString
+                QuietUninstallString = [string]$p.QuietUninstallString
                 InstallerType   = $type
                 SystemComponent = ($p.SystemComponent -eq 1)
                 Key             = $k.Name
@@ -651,5 +653,6 @@ function Invoke-HDScan {
             OS = $ctx.OS; DisplayVersion = $ctx.DisplayVersion; Build = $ctx.Build; IsAdmin = $ctx.IsAdmin; DiskType = $ctx.DiskType
         }
         Items     = $items.ToArray()
+        OtherUser = $ctx.OtherUser
     }
 }

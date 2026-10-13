@@ -6,6 +6,7 @@ function Initialize-HDLang {
     param([string]$Lang = 'id')
     $dir = Join-Path $PSScriptRoot '..\lang'
     $script:HDStrings = @{}
+    $script:HDLang = $Lang
     $base = Import-PowerShellDataFile (Join-Path $dir 'id.psd1')
     foreach ($k in $base.Keys) { $script:HDStrings[$k] = $base[$k] }
     if ($Lang -ne 'id') {
