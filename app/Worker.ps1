@@ -15,7 +15,7 @@ param(
 
 $ErrorActionPreference = 'Stop'
 $AppDir = $PSScriptRoot
-foreach ($f in 'Lang', 'Scan', 'Backup', 'Safety', 'Apply', 'Undo', 'Report') { . (Join-Path $AppDir "core\$f.ps1") }
+foreach ($f in 'Lang', 'Scan', 'Backup', 'Safety', 'Apply', 'Undo', 'Report', 'Metrics') { . (Join-Path $AppDir "core\$f.ps1") }
 foreach ($f in Get-ChildItem (Join-Path $AppDir 'handlers') -Filter *.ps1) { . $f.FullName }
 Initialize-HDLang $Lang
 

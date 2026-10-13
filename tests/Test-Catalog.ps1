@@ -116,7 +116,7 @@ try { [void][xml](Get-Content (Join-Path $app 'ui\MainWindow.xaml') -Raw) } catc
 
 # ------------------------------------------------------------------ handlers (backup / apply / undo)
 # Load the code without running anything that touches the system.
-foreach ($f in 'Lang', 'Scan', 'Backup', 'Safety', 'Apply', 'Undo', 'Report') { . (Join-Path $app "core\$f.ps1") }
+foreach ($f in 'Lang', 'Scan', 'Backup', 'Safety', 'Apply', 'Undo', 'Report', 'Metrics') { . (Join-Path $app "core\$f.ps1") }
 foreach ($f in Get-ChildItem (Join-Path $app 'handlers') -Filter *.ps1) { . $f.FullName }
 Initialize-HDLang 'id'
 
@@ -173,6 +173,14 @@ foreach ($c in $cases) {
         Fail "registry $($c.Kind) value '$($c.Value)' does not survive JSON (got '$back' $($back.GetType().Name))"
     }
 }
+
+# Before/after rows: one per measurement, lower is better.
+$ma = [pscustomobject]@{ RamUsedMB = 1000; CommitMB = 2000; CpuPct = 3.5; Processes = 200; ServicesRunning = 100; StartupEnabled = 3; TasksActive = 200 }
+$mbx = [pscustomobject]@{ RamUsedMB = 900; CommitMB = 2100; CpuPct = 2; Processes = 190; ServicesRunning = 95; StartupEnabled = 0; TasksActive = 190 }
+$rows = @(Get-HDMetricRows $ma $mbx)
+if ($rows.Count -ne 7) { Fail "metric rows: expected 7, got $($rows.Count)" }
+if (@($rows | Where-Object { $_.Better }).Count -ne 6) { Fail 'metric rows: 6 of 7 should be better' }
+foreach ($r in $rows) { if (-not (Test-HDText "metric.$($r.Key)")) { Fail "missing text 'metric.$($r.Key)'" } }
 
 # Item result logic
 $r = Get-HDItemResult -Units @(@{ Label = 'a'; Result = 'Success' }, @{ Label = 'b'; Result = 'Skipped'; Reason = 'x' })

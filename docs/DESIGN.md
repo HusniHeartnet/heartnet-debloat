@@ -281,7 +281,10 @@ Status bahan dari gambar ini:
    - jendela WPF: daftar per kategori, badge risiko, penjelasan, checkbox default, panel peringatan (KFM dll.), panel info keamanan
    - export laporan JSON/HTML
    - Tombol Jalankan/Undo masih nonaktif
-3. Backup + Apply + Undo per handler. Dites di **Windows Sandbox / VM Hyper-V** (Sandbox belum aktif di PC ini, Hyper-V sudah), bukan di laptop utama.
+3. Backup + Apply + Undo per handler: **kode selesai (v0.2, uji coba)**.
+   - handler per jenis target, worker elevated, restore point, verify-after, undo per item/run/semua, ukur sebelum/sesudah
+   - tes statis + tes engine (handler palsu) lolos; probe read-only di laptop referensi cocok dengan scan
+   - uji nyata pertama: di PC teman (bukan VM), termasuk item eksperimen dan uninstall
 4. Bahasa Inggris, vendor OEM lain, signing, rilis.
 
 ## 10. Pertanyaan terbuka

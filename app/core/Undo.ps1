@@ -154,6 +154,11 @@ function Get-HDRunManifest {
     [ordered]@{
         App = $plan.App; Version = $plan.Version; RunId = $plan.RunId; CreatedAt = $plan.CreatedAt; User = $plan.User; Machine = $plan.Machine
         Folder = $RunDir; Run = $run
+        Metrics = [ordered]@{
+            Before = if ($run) { $run.MetricsBefore } else { $null }
+            After  = if ($run) { $run.MetricsAfter } else { $null }
+            Later  = if ($run) { $run.MetricsLater } else { $null }
+        }
         RestorePoint = if ($sides.Machine) { $sides.Machine.RestorePoint } else { $null }
         Items = [object[]]@($items)
     }

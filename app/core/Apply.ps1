@@ -206,6 +206,8 @@ function Invoke-HDRunHeadless {
     param($Scan, [string[]]$Ids, [switch]$AllowNoRestorePoint, [scriptblock]$Log = { param($m) Write-Host $m })
     $dir = New-HDRun -Scan $Scan -Ids $Ids
     & $Log (T 'cli.run.dir' $dir)
+    & $Log ('  ' + (T 'metrics.before'))
+    Save-HDRunState $dir @{ MetricsBefore = (Get-HDMetrics) }
     $plan = Read-HDJson (Join-Path $dir 'plan.json')
     $proc = Start-HDWorker @{ Mode = 'Apply'; RunDir = $dir; Lang = $script:HDLang }
     $workerState = 'Cancelled'
@@ -243,6 +245,7 @@ function Invoke-HDRunHeadless {
     $refuse = if ($fresh.OtherUser) { T 'reason.otheruser' @($fresh.OtherUser.Me, $fresh.OtherUser.Desktop) } else { '' }
     $null = Invoke-HDApplySide -RunDir $dir -Side 'User' -Items $sel.Items -Refused $sel.Refused -RefuseAll $refuse `
         -Progress { param($p) if ($p.Text) { & $Log ('  [user] ' + $p.Text) } }
-    Save-HDRunState $dir @{ UserSide = 'Done'; FinishedAt = (Get-Date).ToString('s') }
+    & $Log ('  ' + (T 'metrics.after'))
+    Save-HDRunState $dir @{ UserSide = 'Done'; FinishedAt = (Get-Date).ToString('s'); MetricsAfter = (Get-HDMetrics) }
     return (Update-HDManifest $dir)
 }

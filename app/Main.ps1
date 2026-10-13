@@ -4,6 +4,7 @@
 #   Headless run:  ... -Cli -Apply default|<id>,<id> [-AllowNoRestorePoint]   (one UAC prompt for system items)
 #   Undo:          ... -Cli -Undo latest|all|<runId>|<runId>:<itemId>,...
 #   Past runs:     ... -Cli -ListRuns
+#   Measure again: ... -Cli -Measure latest|<runId>   (RAM/CPU/processes now vs. before that run)
 # The scan only reads. Changes happen only after "Backup & jalankan" (or -Apply), always with a backup.
 
 param(
@@ -17,15 +18,29 @@ param(
     [string[]]$Undo,
     [switch]$ListRuns,
     [switch]$AllowNoRestorePoint,
+    [string]$Measure,       # latest|<runId>: measure now and compare with that run (e.g. after a restart)
     [string]$Screenshot,    # render the window to this PNG after the scan, then close (changes nothing)
-    [ValidateSet('main', 'confirm', 'undo')][string]$Screen = 'main'
+    [ValidateSet('main', 'confirm', 'undo', 'result')][string]$Screen = 'main',
+    [string]$ResultDir      # with -Screen result: the run folder whose result screen is rendered
 )
 
 $ErrorActionPreference = 'Stop'
 $AppDir = $PSScriptRoot
-foreach ($f in 'Lang', 'Scan', 'Report', 'Backup', 'Safety', 'Apply', 'Undo') { . (Join-Path $AppDir "core\$f.ps1") }
+foreach ($f in 'Lang', 'Scan', 'Report', 'Backup', 'Safety', 'Apply', 'Undo', 'Metrics') { . (Join-Path $AppDir "core\$f.ps1") }
 foreach ($f in Get-ChildItem (Join-Path $AppDir 'handlers') -Filter *.ps1) { . $f.FullName }
 Initialize-HDLang $Lang
+
+function Write-HDMetrics($M) {
+    $mb = $M.Metrics
+    if (-not $mb -or -not $mb.Before) { return }
+    $cmp = if ($mb.Later) { $mb.Later } else { $mb.After }
+    if (-not $cmp) { return }
+    $head = if ($mb.Later) { T 'metrics.col.later' $mb.Later.UptimeMin } else { T 'metrics.col.after' }
+    Write-Host ''
+    Write-Host ('{0,-34} {1,14} {2,14} {3,10}' -f (T 'metrics.title'), (T 'metrics.col.before'), $head, '+/-')
+    foreach ($r in Get-HDMetricRows $mb.Before $cmp) { Write-Host ('{0,-34} {1,14} {2,14} {3,10}' -f $r.Label, $r.A, $r.B, $r.Delta) }
+    Write-Host (T 'metrics.note')
+}
 
 function Write-HDItemResults {
     param([object[]]$Items)
@@ -44,6 +59,17 @@ if ($ListRuns) {
         Write-Host ('== {0}  ({1})  {2}' -f $m.RunId, $m.CreatedAt, $m.Folder) -ForegroundColor Magenta
         foreach ($i in @($m.Items)) { Write-Host ('  {0,-10} {1,-12} {2,-28} {3}' -f (T "result.$($i.Result)"), (T "undo.state.$($i.UndoState)"), $i.Id, $i.Title) }
     }
+    return
+}
+
+if ($Measure) {
+    $runs = @(Get-HDRunList)
+    $m = if ($Measure -eq 'latest') { $runs | Select-Object -First 1 } else { $runs | Where-Object { $_.RunId -eq $Measure } | Select-Object -First 1 }
+    if (-not $m) { Write-Host (T 'undo.none'); return }
+    Write-Host (T 'metrics.measuring')
+    Save-HDRunState $m.Folder @{ MetricsLater = (Get-HDMetrics) }
+    $m = Update-HDManifest $m.Folder
+    Write-HDMetrics $m
     return
 }
 
@@ -76,6 +102,7 @@ if ($Apply) {
     $rp = $m.RestorePoint
     Write-Host $(if ($rp -and $rp.Status -eq 'Created') { T 'run.rp.ok' $rp.Sequence } elseif ($rp) { T 'rp.failed' $rp.Reason } else { T 'run.rp.none' })
     Write-HDItemResults $m.Items
+    Write-HDMetrics $m
     Write-Host (T 'run.report.folder' $m.Folder)
     return
 }
@@ -349,6 +376,7 @@ function Show-HDScan($Scan) {
     $UI.ScanOverlay.Visibility = 'Collapsed'
     if ($Screenshot) {
         if ($Screen -eq 'confirm') { Show-HDConfirm } elseif ($Screen -eq 'undo') { Show-HDUndoScreen }
+        elseif ($Screen -eq 'result') { Show-HDRunResult (Get-HDRunManifest $ResultDir) }
         [void]$Window.Dispatcher.BeginInvoke([Windows.Threading.DispatcherPriority]::ContextIdle, [action] { Save-HDScreenshot $Screenshot; $Window.Close() })
     }
 }
@@ -532,8 +560,16 @@ function Start-HDUiRun {
     $ids = @($State.Scan.Items | Where-Object { $_.Selectable -and $State.Selection[$_.Id] } | ForEach-Object { $_.Id })
     try { $dir = New-HDRun -Scan $State.Scan -Ids $ids }
     catch { [void][Windows.MessageBox]::Show($Window, (T 'ui.error.run' $_.Exception.Message), (T 'ui.appname'), 'OK', 'Error'); return }
-    $State.Run = @{ Kind = 'Apply'; Dir = $dir; Phase = 'Worker'; Answered = 0; Proc = $null; Status = (Join-Path $dir 'machine\status.json') }
+    $State.Run = @{ Kind = 'Apply'; Dir = $dir; Phase = 'Measure'; Answered = 0; Proc = $null; Status = (Join-Path $dir 'machine\status.json') }
     Show-HDProgress (T 'run.title') (T 'run.sub')
+    $UI.ScanStep.Text = T 'metrics.before'
+    $State.Run.Measure = Start-HDMeasureJob
+    $runTimer.Start()
+}
+
+function Start-HDWorkerPhase {
+    $dir = $State.Run.Dir
+    $State.Run.Phase = 'Worker'
     $UI.ScanStep.Text = T 'run.uac'
     $Window.Dispatcher.Invoke([action] {}, [Windows.Threading.DispatcherPriority]::Background)
     $proc = Start-HDWorker @{ Mode = 'Apply'; RunDir = $dir; Lang = $Lang }
@@ -574,6 +610,38 @@ function Show-HDConsent($RestorePoint) {
     return 'Cancel'
 }
 
+function Start-HDMeasureJob {
+    # Get-HDMetrics takes ~5 seconds, so it runs off the UI thread.
+    $sync = [hashtable]::Synchronized(@{ Done = $false; Result = $null; Error = $null })
+    $rs = [runspacefactory]::CreateRunspace()
+    $rs.Open()
+    $ps = [powershell]::Create()
+    $ps.Runspace = $rs
+    [void]$ps.AddScript({
+            param($AppDir, $sync)
+            try {
+                foreach ($f in 'Lang', 'Scan', 'Apply', 'Metrics') { . (Join-Path $AppDir "core\$f.ps1") }
+                $sync.Result = Get-HDMetrics
+            } catch { $sync.Error = $_.ToString() }
+            $sync.Done = $true
+        }).AddArgument($AppDir).AddArgument($sync)
+    return @{ Sync = $sync; PS = $ps; RS = $rs; Handle = $ps.BeginInvoke() }
+}
+
+function Complete-HDMeasureJob($Job) {
+    try { [void]$Job.PS.EndInvoke($Job.Handle) } catch {}
+    $Job.PS.Dispose(); $Job.RS.Dispose()
+    return $Job.Sync.Result
+}
+
+function Start-HDRemeasure([string]$RunDir) {
+    $State.Run = @{ Kind = 'Measure'; Dir = $RunDir; Phase = 'Measure' }
+    Show-HDProgress (T 'metrics.later.title') (T 'metrics.later.sub')
+    $UI.ScanStep.Text = T 'metrics.measuring'
+    $State.Run.Measure = Start-HDMeasureJob
+    $runTimer.Start()
+}
+
 function Start-HDUserSide {
     $r = $State.Run
     $r.Phase = 'User'
@@ -587,7 +655,7 @@ function Start-HDUserSide {
     [void]$ps.AddScript({
             param($AppDir, $Lang, $sync, $Kind, $Dir, $Selection)
             try {
-                foreach ($f in 'Lang', 'Scan', 'Report', 'Backup', 'Safety', 'Apply', 'Undo') { . (Join-Path $AppDir "core\$f.ps1") }
+                foreach ($f in 'Lang', 'Scan', 'Report', 'Backup', 'Safety', 'Apply', 'Undo', 'Metrics') { . (Join-Path $AppDir "core\$f.ps1") }
                 foreach ($f in Get-ChildItem (Join-Path $AppDir 'handlers') -Filter *.ps1) { . $f.FullName }
                 Initialize-HDLang $Lang
                 $prog = { param($p) if ($p.Text) { $sync.Text = $p.Text } }
@@ -598,6 +666,8 @@ function Start-HDUserSide {
                     $sel = Select-HDPlanItems -Scan $scan -Plan $plan -Side 'User'
                     $refuse = if ($scan.OtherUser) { T 'reason.otheruser' @($scan.OtherUser.Me, $scan.OtherUser.Desktop) } else { '' }
                     $null = Invoke-HDApplySide -RunDir $Dir -Side 'User' -Items $sel.Items -Refused $sel.Refused -RefuseAll $refuse -Progress $prog
+                    $sync.Text = T 'metrics.after'
+                    Save-HDRunState $Dir @{ MetricsAfter = (Get-HDMetrics) }
                 } else {
                     $jobId = Split-Path $Dir -Leaf
                     foreach ($s in $Selection) {
@@ -634,6 +704,21 @@ $runTimer.Interval = [TimeSpan]::FromMilliseconds(300)
 $runTimer.Add_Tick({
         $r = $State.Run
         if (-not $r) { $runTimer.Stop(); return }
+        if ($r.Phase -eq 'Measure') {
+            if (-not $r.Measure.Sync.Done) { return }
+            $runTimer.Stop()
+            $metrics = Complete-HDMeasureJob $r.Measure
+            if ($r.Kind -eq 'Measure') {
+                if ($metrics) { Save-HDRunState $r.Dir @{ MetricsLater = $metrics } }
+                $State.Run = $null
+                Hide-HDProgress
+                Show-HDMetricsScreen (Get-HDRunManifest $r.Dir)
+                return
+            }
+            if ($metrics) { Save-HDRunState $r.Dir @{ MetricsBefore = $metrics } }
+            Start-HDWorkerPhase
+            return
+        }
         if ($r.Phase -eq 'Worker') {
             $s = $null
             try { $s = Read-HDJson $r.Status } catch {}
@@ -711,6 +796,65 @@ function Add-HDResultCard($Item, [string]$Result, [object[]]$Reasons, [object[]]
     [void]$UI.FlowPanel.Children.Add($c.Outer)
 }
 
+function Add-HDMetricsCard($M) {
+    # Table: measurement | before | right after | +/- [| later | +/-]
+    $mb = $M.Metrics
+    if (-not $mb -or -not $mb.Before) { return }
+    $c = New-HDPanelCard
+    [void]$c.Stack.Children.Add((New-HDText (T 'metrics.title') 15 $Colors.Ink 'Bold'))
+    $cols = @(@($mb.After, $mb.Later) | Where-Object { $_ })
+    if (-not $cols.Count) { return }
+    $grid = New-Object Windows.Controls.Grid
+    $grid.Margin = '0,8,0,0'
+    $n = 2 + 2 * $cols.Count
+    for ($k = 0; $k -lt $n; $k++) {
+        $cd = New-Object Windows.Controls.ColumnDefinition
+        $cd.Width = if ($k -eq 0) { New-Object Windows.GridLength 1.6, 'Star' } else { New-Object Windows.GridLength 1, 'Star' }
+        $grid.ColumnDefinitions.Add($cd)
+    }
+    $add = {
+        param($text, $row, $col, $color, $weight)
+        $t = New-HDText $text 12.5 $color $weight
+        $t.Margin = '0,2,10,2'
+        [Windows.Controls.Grid]::SetRow($t, $row); [Windows.Controls.Grid]::SetColumn($t, $col)
+        [void]$grid.Children.Add($t)
+    }
+    $heads = @('', (T 'metrics.col.before'))
+    if ($mb.After) { $heads += (T 'metrics.col.after'), '+/-' }
+    if ($mb.Later) { $heads += (T 'metrics.col.later' $mb.Later.UptimeMin), '+/-' }
+    $rowsByCol = @(foreach ($x in $cols) { , @(Get-HDMetricRows $mb.Before $x) })
+    $count = $rowsByCol[0].Count
+    for ($r = 0; $r -le $count; $r++) { $grid.RowDefinitions.Add((New-Object Windows.Controls.RowDefinition)) }
+    for ($k = 0; $k -lt $heads.Count; $k++) { & $add $heads[$k] 0 $k $Colors.Muted 'SemiBold' }
+    for ($r = 0; $r -lt $count; $r++) {
+        $first = $rowsByCol[0][$r]
+        & $add $first.Label ($r + 1) 0 $Colors.Ink 'Normal'
+        & $add $first.A ($r + 1) 1 $Colors.Ink 'Normal'
+        for ($k = 0; $k -lt $rowsByCol.Count; $k++) {
+            $row = $rowsByCol[$k][$r]
+            & $add $row.B ($r + 1) (2 + 2 * $k) $Colors.Ink 'Normal'
+            & $add $row.Delta ($r + 1) (3 + 2 * $k) $(if ($row.Better) { $Colors.Navy } else { $Colors.Muted }) 'SemiBold'
+        }
+    }
+    [void]$c.Stack.Children.Add($grid)
+    $note = New-HDText (T 'metrics.note') 12 $Colors.Muted
+    $note.Margin = '0,8,0,0'
+    [void]$c.Stack.Children.Add($note)
+    if (($mb.After -and $mb.After.Elevated -ne $mb.Before.Elevated) -or ($mb.Later -and $mb.Later.Elevated -ne $mb.Before.Elevated)) {
+        $e = New-HDText (T 'metrics.elevated') 12 $Colors.Muted
+        $e.FontStyle = 'Italic'
+        [void]$c.Stack.Children.Add($e)
+    }
+    [void]$UI.FlowPanel.Children.Add($c.Outer)
+}
+
+function Show-HDMetricsScreen($M) {
+    Show-HDFlow (T 'metrics.screen.title') (T 'metrics.screen.sub' $M.RunId)
+    Add-HDMetricsCard $M
+    [void]$UI.FlowButtons.Children.Add((New-HDButton (T 'undo.back') { Show-HDUndoScreen }))
+    [void]$UI.FlowButtons.Children.Add((New-HDButton (T 'result.done') { Hide-HDFlow } -Primary))
+}
+
 function Show-HDRunResult($M) {
     if (-not $M) { Hide-HDFlow; Start-HDScan; return }
     $items = @($M.Items)
@@ -723,6 +867,7 @@ function Show-HDRunResult($M) {
     elseif ($rp) { Add-HDFlowNote (T 'rp.failed' $rp.Reason) '#FFF6E6' $Colors.Wing }
     else { Add-HDFlowNote (T 'run.rp.none') '#FFF6E6' $Colors.Wing }
     if ($items | Where-Object { $_.Restart }) { Add-HDFlowNote (T 'result.restart') }
+    Add-HDMetricsCard $M
     foreach ($i in $items) { Add-HDResultCard $i $i.Result $i.Reasons $i.Units }
     $UI.FlowStatus.Text = T 'run.report.folder' $M.Folder
     $folder = $M.Folder
@@ -759,6 +904,19 @@ function Show-HDUndoScreen {
         $rpt = New-HDText $rpText 12 $Colors.Muted
         $rpt.Margin = '0,2,0,6'
         [void]$c.Stack.Children.Add($rpt)
+        if ($m.Metrics -and $m.Metrics.Before) {
+            $mrow = New-Object Windows.Controls.DockPanel
+            $mrow.Margin = '0,0,0,6'
+            $mb = New-HDButton (T 'metrics.again') { param($s, $e) Start-HDRemeasure $s.Tag } -Tag $m.Folder
+            $mb.Padding = '12,4'
+            [Windows.Controls.DockPanel]::SetDock($mb, 'Right')
+            [void]$mrow.Children.Add($mb)
+            $last = if ($m.Metrics.Later) { $m.Metrics.Later } else { $m.Metrics.After }
+            $mt = New-HDText $(if ($last) { T 'metrics.summary' @($m.Metrics.Before.RamUsedMB, $last.RamUsedMB, $m.Metrics.Before.Processes, $last.Processes) } else { '' }) 12 $Colors.Muted
+            $mt.VerticalAlignment = 'Center'
+            [void]$mrow.Children.Add($mt)
+            [void]$c.Stack.Children.Add($mrow)
+        }
         foreach ($i in @($m.Items | Where-Object { $_.UndoState -ne 'None' })) {
             $row = New-Object Windows.Controls.DockPanel
             $row.Margin = '0,4,0,4'

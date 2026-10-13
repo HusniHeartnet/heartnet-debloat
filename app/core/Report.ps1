@@ -92,6 +92,22 @@ td,th{border-top:1px solid #d5dde3;padding:3px 6px;text-align:left;vertical-alig
 <p>$(ConvertTo-HDHtml ('{0} {1} | {2} | {3}' -f $m.Machine.Manufacturer, $m.Machine.Model, $m.User, $m.CreatedAt))</p>
 <p>$(ConvertTo-HDHtml $rpText)</p></header><main>
 "@)
+    $mb = $m.Metrics
+    if ($mb -and $mb.Before) {
+        $later = $mb.Later
+        [void]$sb.Append("<div class='card'><h3>$(ConvertTo-HDHtml (T 'metrics.title'))</h3><table><tr><th></th><th>$(T 'metrics.col.before')</th><th>$(T 'metrics.col.after')</th><th>+/-</th>")
+        if ($later) { [void]$sb.Append("<th>$(ConvertTo-HDHtml (T 'metrics.col.later' $later.UptimeMin))</th><th>+/-</th>") }
+        [void]$sb.Append('</tr>')
+        $rowsAfter = @(Get-HDMetricRows $mb.Before $mb.After)
+        $rowsLater = if ($later) { @(Get-HDMetricRows $mb.Before $later) } else { @() }
+        for ($k = 0; $k -lt $rowsAfter.Count; $k++) {
+            $ra = $rowsAfter[$k]
+            [void]$sb.Append(('<tr><td>{0}</td><td>{1}</td><td>{2}</td><td>{3}</td>' -f (ConvertTo-HDHtml $ra.Label), $ra.A, $ra.B, $ra.Delta))
+            if ($later) { $rl = $rowsLater[$k]; [void]$sb.Append(('<td>{0}</td><td>{1}</td>' -f $rl.B, $rl.Delta)) }
+            [void]$sb.Append('</tr>')
+        }
+        [void]$sb.Append("</table><p class='reason' style='color:var(--muted)'>$(ConvertTo-HDHtml (T 'metrics.note'))</p></div>")
+    }
     foreach ($i in @($m.Items)) {
         [void]$sb.Append("<div class='card'><h3>$(ConvertTo-HDHtml $i.Title)<span class='badge $($i.Result)'>$(ConvertTo-HDHtml (T "result.$($i.Result)"))</span>")
         if ($i.UndoState -in 'Undone', 'Partial') { [void]$sb.Append("<span class='badge Undone'>$(ConvertTo-HDHtml (T "undo.state.$($i.UndoState)"))</span>") }
