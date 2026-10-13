@@ -35,7 +35,7 @@ Tidak perlu install. Syarat: Windows 10/11 (Windows PowerShell 5.1 sudah bawaan)
 6. **Restart**, buka app lagi, **Riwayat & undo > Ukur ulang sekarang** untuk melihat efek setelah restart.
 7. Mau mengembalikan? **Riwayat & undo** > **Undo** per item, per run, atau **Undo semuanya**.
 
-Semua catatan backup ada di `C:\ProgramData\HeartnetDebloatuns\<tanggal-jam>\` (`manifest.json` berisi nilai sebelum/sesudah tiap target, `report.html` laporannya). Kalau ada yang gagal, kirim folder itu.
+Semua catatan backup ada di `C:\ProgramData\HeartnetDebloat\runs\<tanggal-jam>\` (`manifest.json` berisi nilai sebelum/sesudah tiap target, `report.html` laporannya). Kalau ada yang gagal, kirim folder itu.
 
 Mode command line (tanpa jendela):
 
