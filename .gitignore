@@ -1,0 +1,4 @@
+runs/
+*.log
+scan-report*.json
+scan-report*.html
