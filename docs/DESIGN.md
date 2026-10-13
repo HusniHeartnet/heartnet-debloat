@@ -226,25 +226,25 @@ Karakternya pas dengan prinsip "audit dulu":
 - **Topi tinggi** = rapi dan sopan, bukan tool "hajar semua".
 - **Sayap kelelawar** = berani masuk ke sudut gelap Windows (service, task, telemetri) lalu membereskannya.
 
-**Palet** (diambil dari gambar):
+**Palet** (diambil dari gambar). Revisi 2026-10-13: atas permintaan user **tidak ada lagi area ungu/gelap besar**, karena tulisan di atasnya susah dibaca. Ungu hanya tersisa di gambar maskot. Aturannya: teks selalu gelap di atas latar terang.
 
 | Token | Warna | Dipakai untuk |
 |---|---|---|
 | `ink` | `#2E1E1F` | outline tebal, teks utama |
-| `plum` | `#3E263C` | header/sidebar (warna topi) |
-| `plum-light` | `#6A2D4E` | tombol utama, aksen (pita topi) |
-| `wing` | `#761D31` | badge **Eksperimen**, tombol bahaya |
-| `slate` | `#708DAB` | badge **Rendah**, link, progress (bulu biru) |
-| `paper` | `#ECF6F7` | latar kartu (bulu putih) |
-| `amber` | `#E3A33B` | badge **Opsional**, peringatan (mata) |
-| `blush` | `#C47B84` | aksen kecil, hover (telinga) |
+| `navy` | `#3F5F80` | badge **Rendah**, tombol utama, link, tagline (bulu biru versi gelap, kontras ~6:1 dengan putih) |
+| `slate` | `#708DAB` | progress bar, aksen dekoratif saja (bukan latar teks) |
+| `slate-light` | `#DCE7F1` | sidebar, kartu ringkasan |
+| `paper` | `#F4F8FA` | latar halaman |
+| `wing` | `#761D31` | badge **Eksperimen**, teks peringatan |
+| `amber` | `#E3A33B` | badge **Opsional**/**Cek dulu**, tombol "Scan sebagai admin" (mata) |
+| `muted` | `#3B4650` | teks sekunder (untung/rugi, detail) |
 
 **Gaya UI.** Mengikuti gaya stiker di gambar:
 
 - kartu putih dengan **outline gelap tebal (2 px)** dan sudut membulat
 - bayangan datar (bukan blur)
 - font tebal untuk judul
-- tema gelap (plum) dan tema terang (paper)
+- tema terang saja
 
 **Maskot di app:**
 
@@ -256,11 +256,10 @@ Karakternya pas dengan prinsip "audit dulu":
 | Hasil | maskot + ringkasan, contoh: "Ketemu 23 hal yang bisa dibereskan, 2 yang perlu kamu cek dulu" |
 | Panel peringatan (mis. OneDrive KFM) | maskot dengan ekspresi serius |
 
-Bahan yang masih perlu dibuat dari gambar ini:
+Status bahan dari gambar ini:
 
-- PNG transparan (latarnya sekarang putih)
-- `.ico` multi-size
-- varian ekspresi (bisa dibuat belakangan; MVP cukup pakai satu gambar)
+- Sudah ada: PNG transparan dan `.ico` multi-size (`tools/Build-Assets.ps1`).
+- Belum ada: varian ekspresi (nanti saja).
 
 ## 8. Temuan saat membangun MVP scan (2026-10-13)
 

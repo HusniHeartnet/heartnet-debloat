@@ -63,9 +63,9 @@ function New-HDImage([string]$Path) {
     return $bmp
 }
 
-$Colors = @{ Ink = '#2E1E1F'; Plum = '#3E263C'; PlumLight = '#6A2D4E'; Wing = '#761D31'; Slate = '#708DAB'; Paper = '#ECF6F7'; Amber = '#E3A33B'; Blush = '#C47B84'; Muted = '#5B4B4C' }
+$Colors = @{ Ink = '#2E1E1F'; Navy = '#3F5F80'; Wing = '#761D31'; Slate = '#708DAB'; SlateLight = '#DCE7F1'; Amber = '#E3A33B'; Muted = '#3B4650' }
 $RiskStyle = @{
-    Low          = @{ Bg = $Colors.Slate; Fg = '#FFFFFF' }
+    Low          = @{ Bg = $Colors.Navy; Fg = '#FFFFFF' }
     Optional     = @{ Bg = $Colors.Amber; Fg = $Colors.Ink }
     Experimental = @{ Bg = $Colors.Wing;  Fg = '#FFFFFF' }
     Info         = @{ Bg = '#FFFFFF';     Fg = $Colors.Ink }
@@ -134,7 +134,7 @@ function New-HDCard($Item) {
     $right = New-Object Windows.Controls.StackPanel
     $right.Orientation = 'Horizontal'; [Windows.Controls.DockPanel]::SetDock($right, 'Right')
     if ($Item.Kind -eq 'Action') {
-        $stateColor = switch ($Item.State) { 'Applicable' { $Colors.PlumLight } 'Partial' { $Colors.PlumLight } 'Blocked' { $Colors.Wing } default { $Colors.Muted } }
+        $stateColor = switch ($Item.State) { 'Applicable' { $Colors.Navy } 'Partial' { $Colors.Navy } 'Blocked' { $Colors.Wing } default { $Colors.Muted } }
         $st = New-HDText (T "state.$($Item.State)") 12 $stateColor 'SemiBold'
         $st.VerticalAlignment = 'Center'; $st.Margin = '10,0,0,0'
         [void]$right.Children.Add((New-HDBadge (T "risk.$($Item.Risk)") $RiskStyle[$Item.Risk].Bg $RiskStyle[$Item.Risk].Fg))
@@ -182,7 +182,7 @@ function New-HDCard($Item) {
     }
     if ($Item.Details.Count) {
         $exp = New-Object Windows.Controls.Expander
-        $exp.Header = T 'ui.details'; $exp.Margin = '0,6,0,0'; $exp.FontSize = 12; $exp.Foreground = New-HDBrush $Colors.PlumLight
+        $exp.Header = T 'ui.details'; $exp.Margin = '0,6,0,0'; $exp.FontSize = 12; $exp.Foreground = New-HDBrush $Colors.Navy
         $dt = New-HDText (($Item.Details) -join "`n") 12 $Colors.Muted
         $dt.FontFamily = 'Consolas'; $dt.Margin = '18,4,0,0'
         $exp.Content = $dt
@@ -201,14 +201,14 @@ function New-HDSummaryCard {
     $shadow = New-Object Windows.Controls.Border
     $shadow.Background = New-HDBrush $Colors.Ink; $shadow.CornerRadius = 14; $shadow.Margin = '4,4,0,0'
     $card = New-Object Windows.Controls.Border
-    $card.Background = New-HDBrush $Colors.Plum; $card.BorderBrush = New-HDBrush $Colors.Ink; $card.BorderThickness = 2
+    $card.Background = New-HDBrush $Colors.SlateLight; $card.BorderBrush = New-HDBrush $Colors.Ink; $card.BorderThickness = 2
     $card.CornerRadius = 14; $card.Margin = '0,0,4,4'; $card.Padding = '12,10'
     $dock = New-Object Windows.Controls.DockPanel
     $img = New-Object Windows.Controls.Image
     $img.Source = $mascot; $img.Width = 84; $img.Height = 84
     [Windows.Controls.DockPanel]::SetDock($img, 'Left')
     [void]$dock.Children.Add($img)
-    $txt = New-HDText (T 'ui.summary' @($actionable, $done, $check)) 16 '#ECF6F7' 'Bold'
+    $txt = New-HDText (T 'ui.summary' @($actionable, $done, $check)) 16 $Colors.Ink 'Bold'
     $txt.VerticalAlignment = 'Center'; $txt.Margin = '12,0,0,0'
     [void]$dock.Children.Add($txt)
     $card.Child = $dock
@@ -230,7 +230,9 @@ function Show-HDCategory([string]$Cat) {
     $items = $items | ForEach-Object { [pscustomobject]@{ I = $_; N = $idx++ } } |
         Sort-Object { if ($_.I.Kind -eq 'Warning') { 0 } else { $order[$_.I.State] } }, N | ForEach-Object { $_.I }
     if (-not $items) {
-        [void]$UI.CardPanel.Children.Add((New-HDText (T 'ui.empty') 14 $Colors.Muted))
+        $hidden = @($State.Scan.Items | Where-Object { $_.Category -eq $Cat }).Count
+        $key = if ($hidden) { 'ui.empty.hidden' } else { 'ui.empty' }
+        [void]$UI.CardPanel.Children.Add((New-HDText (T $key) 14 $Colors.Muted))
     }
     foreach ($i in $items) { [void]$UI.CardPanel.Children.Add((New-HDCard $i)) }
     $UI.CardScroll.ScrollToTop()
@@ -247,7 +249,7 @@ function Update-HDNav {
         $row.Tag = $c
         $count = if ($c -eq 'warn') { $items.Count } else { $todo }
         if ($count -gt 0) {
-            $bg = if ($c -eq 'warn') { $Colors.Amber } else { $Colors.Slate }
+            $bg = if ($c -eq 'warn') { $Colors.Amber } else { $Colors.Navy }
             $fg = if ($c -eq 'warn') { $Colors.Ink } else { '#FFFFFF' }
             $badge = New-HDBadge ([string]$count) $bg $fg
             [Windows.Controls.DockPanel]::SetDock($badge, 'Right')

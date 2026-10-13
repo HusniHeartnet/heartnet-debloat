@@ -21,6 +21,7 @@
     'ui.details'          = 'What was detected'
     'ui.tradeoff'         = 'Trade-off'
     'ui.empty'            = 'Nothing in this category for your PC.'
+    'ui.empty.hidden'     = 'Everything in this category is already done or not on your PC. Tick "Also show items that are done / not present" to see it.'
     'ui.error'            = 'Scan failed: {0}'
     'ui.mvp'              = 'Scan version (MVP): read-only'
 

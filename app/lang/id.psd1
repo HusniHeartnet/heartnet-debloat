@@ -24,6 +24,7 @@
     'ui.details'          = 'Detail yang terdeteksi'
     'ui.tradeoff'         = 'Untung / rugi'
     'ui.empty'            = 'Tidak ada item di kategori ini untuk PC kamu.'
+    'ui.empty.hidden'     = 'Semua di kategori ini sudah beres atau tidak ada di PC kamu. Centang "Tampilkan juga yang sudah beres / tidak ada" untuk melihatnya.'
     'ui.error'            = 'Scan gagal: {0}'
     'ui.mvp'              = 'Versi scan (MVP): read-only'
 
