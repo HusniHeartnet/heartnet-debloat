@@ -207,7 +207,54 @@ Driver/APO audio **tidak disentuh**. Speaker tetap normal, hanya efek enhancer y
 9. **Tidak menghapus file.** Hanya dipindah ke backup. Uninstall adalah satu-satunya aksi destruktif, dan selalu opt-in.
 10. **Pending reboot** dideteksi. Laporan akhir menyebut item mana yang butuh restart.
 
-## 7. Rencana kerja
+## 7. Identitas visual & maskot
+
+Maskot: kucing abu-biru berkacamata bundar, bertopi tinggi, berkalung, dengan satu sayap kelelawar.
+File asli: `assets/mascot-original.jpg`.
+
+Karakternya pas dengan prinsip "audit dulu":
+
+- **Kacamata** = teliti, memeriksa dulu sebelum bertindak.
+- **Topi tinggi** = rapi dan sopan, bukan tool "hajar semua".
+- **Sayap kelelawar** = berani masuk ke sudut gelap Windows (service, task, telemetri) lalu membereskannya.
+
+**Palet** (diambil dari gambar):
+
+| Token | Warna | Dipakai untuk |
+|---|---|---|
+| `ink` | `#2E1E1F` | outline tebal, teks utama |
+| `plum` | `#3E263C` | header/sidebar (warna topi) |
+| `plum-light` | `#6A2D4E` | tombol utama, aksen (pita topi) |
+| `wing` | `#761D31` | badge **Eksperimen**, tombol bahaya |
+| `slate` | `#708DAB` | badge **Rendah**, link, progress (bulu biru) |
+| `paper` | `#ECF6F7` | latar kartu (bulu putih) |
+| `amber` | `#E3A33B` | badge **Opsional**, peringatan (mata) |
+| `blush` | `#C47B84` | aksen kecil, hover (telinga) |
+
+**Gaya UI.** Mengikuti gaya stiker di gambar:
+
+- kartu putih dengan **outline gelap tebal (2 px)** dan sudut membulat
+- bayangan datar (bukan blur)
+- font tebal untuk judul
+- tema gelap (plum) dan tema terang (paper)
+
+**Maskot di app:**
+
+| Tempat | Versi maskot |
+|---|---|
+| Ikon app | kepala + topi |
+| Header | maskot kecil |
+| Saat scan | "kucing memeriksa", kacamata berkilau |
+| Hasil | maskot + ringkasan, contoh: "Ketemu 23 hal yang bisa dibereskan, 2 yang perlu kamu cek dulu" |
+| Panel peringatan (mis. OneDrive KFM) | maskot dengan ekspresi serius |
+
+Bahan yang masih perlu dibuat dari gambar ini:
+
+- PNG transparan (latarnya sekarang putih)
+- `.ico` multi-size
+- varian ekspresi (bisa dibuat belakangan; MVP cukup pakai satu gambar)
+
+## 8. Rencana kerja
 1. **Sekarang:** design doc ini disetujui.
 2. **MVP Scan** (sesi ini):
    - engine scan + katalog (deteksi saja) + probe
@@ -217,7 +264,8 @@ Driver/APO audio **tidak disentuh**. Speaker tetap normal, hanya efek enhancer y
 3. Backup + Apply + Undo per handler. Dites di **Windows Sandbox / VM Hyper-V** (Sandbox belum aktif di PC ini, Hyper-V sudah), bukan di laptop utama.
 4. Bahasa Inggris, vendor OEM lain, signing, rilis.
 
-## 8. Pertanyaan untuk kamu
+## 9. Pertanyaan untuk kamu
 1. Setuju PowerShell 5.1 + WPF?
 2. Rencana rilis: open source (GitHub, gratis), gratis tapi tertutup, atau berbayar? Ini berpengaruh ke lisensi dan cara membangun kepercayaan.
 3. Office: cukup panduan + link resmi (rekomendasi), atau tetap dicoba otomatis dengan opsi "eksperimen"?
+4. Maskotnya mau dikasih nama? Gambar ini juga aman dipakai untuk produk komersial? (Kalau buatan AI atau orang lain, cek dulu lisensinya.)
